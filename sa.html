@@ -48,7 +48,6 @@ select:focus-visible,button:focus-visible,a:focus-visible{outline:2px solid var(
 .drv div b{display:block;font-size:15px}.drv div span{font-size:12px;color:var(--mute)}.drv .otp{margin-left:auto;text-align:right}.drv .otp b{font-size:20px;letter-spacing:.1em;color:var(--idle)}
 table.fare{width:100%;border-collapse:collapse;font-size:13px;margin:8px 0}table.fare td:last-child{text-align:right}table.fare tr.tot td{font-weight:800;font-size:16px;color:var(--idle);border:0}
 #out details{margin-top:8px;font-size:13px}#out summary{cursor:pointer;color:var(--mute)}
-.srch{display:flex;justify-content:space-between;align-items:center;background:#0a0e20;border-radius:8px;padding:8px 12px;margin:0 0 10px;font-size:12px;color:var(--mute)}.srch b{font-size:22px;color:var(--ink);letter-spacing:.05em}
 a.lnk{display:block;text-align:center;margin-top:10px;color:var(--idle);font-size:13px}
 </style>
 </head>
@@ -73,8 +72,7 @@ a.lnk{display:block;text-align:center;margin-top:10px;color:var(--idle);font-siz
     <label for="eng">Matching engine</label>
     <select id="eng"><option value="batched">Batched (best overall plan)</option><option value="greedy">Greedy (nearest driver)</option></select>
     <button id="book" class="go" disabled>Book ride</button>
-    <div class="row" style="grid-template-columns:1fr 1fr 1fr"><button id="reset">Cancel and reset</button><button id="open" type="button">Open simulator</button><button id="opend" type="button">Open driver app</button></div>
-    <div id="dstat" class="hint"></div>
+    <div class="row"><button id="reset">Cancel and reset</button><button id="open" type="button">Open simulator</button></div>
     <div id="st" class="status">Choose a pickup location, then a destination.</div>
     <p class="hint">Distance uses the Haversine formula on the grid's latitude and longitude, times 1.3 as a road estimate. Fares use assumed rates (base, per km, per minute, booking fee, minimum fare, demand pricing), not real Ola or Uber prices. All vehicle types share one driver pool in this demo. Place names are made-up spots.</p>
     <div id="out" style="margin-top:12px"></div>
@@ -101,19 +99,6 @@ S.drivers=[...Array(60)].map((_,i)=>({id:i,name:NM[i%15]+' #'+i,x:r0()*W,y:r0()*
 
 const cv=$('map'),c=cv.getContext('2d');cv.width=W;cv.height=H;
 const ch=typeof BroadcastChannel!=='undefined'?new BroadcastChannel('ride-pin'):null;
-/* Driver app link: offers go to driver.html, which has OFFER_MS to answer */
-const OFFER_MS=15000;
-const dch=typeof BroadcastChannel!=='undefined'?new BroadcastChannel('ride-driver'):null;
-let driverSeen=0,driverOnline=false;
-function humanMode(){return !!dch&&driverOnline&&performance.now()-driverSeen<6000}
-if(dch)dch.onmessage=e=>{const m=e.data;if(!m)return;
-  if(m.type==='hello'){driverSeen=performance.now();driverOnline=!!m.online}
-  else if(m.type==='answer'){const d=S.drivers.find(x=>x.offerId===m.id&&x.s==='offered'&&x.human);if(d)d.answer=m.accept?'acc':'rej'}};
-if(dch){dch.postMessage({type:'ping'});setInterval(()=>dch.postMessage({type:'ping'}),3000)}
-function placeName(p){let b=null,bd=60;for(const k in PLACES){const q=PLACES[k],e=Math.hypot(q[0]-p.x,q[1]-p.y);if(e<bd){bd=e;b=k}}return b?'Near '+b:'Dropped pin'}
-function sendOffer(d,r){S.attempt=(S.attempt||0)+1;d.human=true;d.answer=null;d.offerId=Date.now()+'-'+d.id;d.deadline=performance.now()+OFFER_MS;d.until=Infinity;
-  const F=S.fare;dch.postMessage({type:'offer',id:d.offerId,driver:d.name,dx:d.x,dy:d.y,pickup:{x:r.x,y:r.y,name:placeName(r)},dest:{x:r.dest.x,y:r.dest.y,name:placeName(r.dest)},pkm:hav(d,r)*ROAD,tkm:F.km,fare:F.tot-F.fee,veh:VEH[F.v].n,sec:OFFER_MS/1000,attempt:S.attempt})}
-function dstat(){const e=$('dstat');if(e)e.textContent=humanMode()?'Driver app connected. Each offer waits up to '+OFFER_MS/1000+' seconds for the driver to accept. If it is rejected or ignored, the search continues with the next driver.':'Driver app not open. Drivers answer automatically at random. Open the driver app to answer offers yourself.'}
 
 function index(){const g=new Map();for(const d of S.drivers)if(d.s==='idle'&&S.t>=d.cool){const k=(d.x/CELL|0)+','+(d.y/CELL|0);if(!g.has(k))g.set(k,[]);g.get(k).push(d)}return g}
 function near(g,x,y,k){const cx=x/CELL|0,cy=y/CELL|0,out=[];
@@ -133,18 +118,16 @@ function claim(d,r){ // atomic: only an AVAILABLE driver can be locked
   const dist=Math.hypot(d.x-r.x,d.y-r.y),p=d.acc*(dist>250?.7:1),u=ra();
   d.fate=u<p?'acc':(u<p+(1-p)*.4?'to':'rej');
   if(r.me)decide(d,r,p);
-  d.s='offered';d.rider=r;d.until=S.t+(d.fate==='to'?4:1.2);r.pending=true;r.tried.add(d.id);
-  if(r.me&&humanMode())sendOffer(d,r);
-  return true}
-function resolve(d){const r=d.rider,wasHuman=d.human,oid=d.offerId;d.human=false;d.answer=null;
+  d.s='offered';d.rider=r;d.until=S.t+(r.me?(1+ra()*2)*2:(d.fate==='to'?4:1.2));r.offerT=S.t;r.pending=true;r.tried.add(d.id);return true}
+function resolve(d){const r=d.rider;
   if(d.fate==='acc'){
     const travel=Math.hypot(d.x-r.x,d.y-r.y)/SPEED;
     d.s='busy';d.from={x:d.x,y:d.y};d.pick={x:r.x,y:r.y};d.drop=(r.me&&r.dest)?{x:r.dest.x,y:r.dest.y}:{x:ra()*W,y:ra()*H};
     d.t0=S.t;d.t1=S.t+travel;d.until=d.t1+8+ra()*8;
     S.q=S.q.filter(x=>x!==r);
-    if(r.me){S.res={d,travel,wait:S.t-r.t0,arrive:d.t1,pkm:hav(d.from,r)*ROAD,human:wasHuman,offerId:oid,rt:performance.now()};S.mlog.push(d.name+' accepted. Pickup in '+travel.toFixed(1)+'s.')}
+    if(r.me){S.res={d,travel,wait:S.t-r.t0,arrive:d.t1,pkm:hav(d.from,r)*ROAD};S.mlog.push(d.name+' accepted. Pickup in '+travel.toFixed(1)+'s.')}
   }else{
-    if(r.me){S.lastFail=d.name+(d.fate==='to'?(wasHuman?' did not respond in '+OFFER_MS/1000+' seconds.':' did not respond.'):' rejected the request.');S.mlog.push(S.lastFail+' Lock released. Finding the next best driver.');if(wasHuman&&d.fate==='to')dch.postMessage({type:'close',id:oid,result:'to'})}
+    if(r.me)S.mlog.push(d.name+(d.fate==='to'?' did not respond (timeout), lock released.':' rejected the offer.')+' Finding the next best driver.');
     d.s='idle';d.cool=S.t+3;d.rider=null;r.pending=false;if(r.tried.size>5)r.tried.clear()}}
 function batch(){
   const g=index();let q=S.q.filter(r=>!r.pending).slice(0,30);if(!q.length)return;
@@ -162,12 +145,12 @@ function tick(dt){
   S.t+=dt;S.sp+=1.5*dt;
   while(S.sp>=1){S.sp--;S.q.push({id:S.nid++,x:rs()*W,y:rs()*H,t0:S.t,tried:new Set(),pending:false})}
   for(const d of S.drivers){
-    if(d.s==='offered'){if(d.human){if(d.answer){d.fate=d.answer;resolve(d)}else if(performance.now()>=d.deadline){d.fate='to';resolve(d)}}else if(S.t>=d.until)resolve(d)}
+    if(d.s==='offered'&&S.t>=d.until)resolve(d);
     else if(d.s==='busy'){
       if(S.t>=d.until){d.s='idle';d.since=S.t;d.x=d.drop.x;d.y=d.drop.y;d.rider=null}
       else if(S.t<d.t1){const f=(S.t-d.t0)/(d.t1-d.t0||1);d.x=d.from.x+(d.pick.x-d.from.x)*f;d.y=d.from.y+(d.pick.y-d.from.y)*f}
       else{const f=(S.t-d.t1)/(d.until-d.t1);d.x=d.pick.x+(d.drop.x-d.pick.x)*f;d.y=d.pick.y+(d.drop.y-d.pick.y)*f}
-    }else if(d.s==='idle'){const h=d.id*1.7+Math.sin(S.t*.3+d.id)*2;d.x=Math.min(W,Math.max(0,d.x+Math.cos(h)*10*dt));d.y=Math.min(H,Math.max(0,d.y+Math.sin(h)*10*dt))}}
+    }}
   S.q=S.q.filter(r=>r.pending||r.me||S.t-r.t0<30);
   if(S.engine==='greedy'){const g=index();for(const r of S.q){if(r.pending)continue;
     const cd=near(g,r.x,r.y,3).filter(d=>d.s==='idle'&&!r.tried.has(d.id));if(!cd.length)continue;
@@ -188,12 +171,11 @@ $('setP').onclick=()=>mode('pickup');$('setD').onclick=()=>mode('dest');
 cv.onclick=e=>{const r=cv.getBoundingClientRect();setPoint((e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height);(S.setting==='pickup'?$('place'):$('dplace')).value=''};
 $('eng').onchange=e=>S.engine=e.target.value;
 $('open').onclick=()=>window.open('index.html','_blank');
-$('opend').onclick=()=>window.open('driver.html','_blank');
 $('book').onclick=()=>{
   if(!S.pin||!S.dest)return;
   if(S.me)S.q=S.q.filter(x=>x!==S.me);
-  for(const d of S.drivers)if(d.s==='offered'&&d.rider&&d.rider.me){if(d.human){dch.postMessage({type:'close',id:d.offerId,result:'cancelled'});d.human=false}d.s='idle';d.rider=null}
-  S.me={id:S.nid++,x:S.pin.x,y:S.pin.y,t0:S.t,tried:new Set(),pending:false,me:true,dest:S.dest,rt0:performance.now()};S.q.push(S.me);S.attempt=0;S.lastFail='';S.sent=-1;
+  for(const d of S.drivers)if(d.s==='offered'&&d.rider&&d.rider.me){d.s='idle';d.rider=null}
+  S.me={id:S.nid++,x:S.pin.x,y:S.pin.y,t0:S.t,tried:new Set(),pending:false,me:true,dest:S.dest};S.q.push(S.me);
   {const km=hav(S.pin,S.dest)*ROAD,min=Math.max(1,Math.round(km/KMH*60));S.fare=fareCalc(S.veh,km,min,surgeMult())}
   S.dec=null;S.res=null;S.mlog=['Ride requested. Searching nearby grid cells for available drivers.'];
   const id=Date.now(),msg={type:'pin',x:S.pin.x,y:S.pin.y,dest:S.dest,id};S.acked=false;
@@ -202,7 +184,7 @@ $('book').onclick=()=>{
   setStatus('Pin sent to the simulator tab. Waiting for it to confirm...','warn');
   setTimeout(()=>{if(!S.acked)setStatus('Simulator tab did not answer. Open the simulator in another tab of this site, then book again.','warn')},1500)};
 if(ch)ch.onmessage=e=>{if(e.data&&e.data.type==='ack'){S.acked=true;setStatus('Simulator received your pin. It is now in Request a ride on both maps.','ok')}};
-$('reset').onclick=()=>{if(S.me)S.q=S.q.filter(x=>x!==S.me);for(const d of S.drivers)if(d.s==='offered'&&d.rider&&d.rider.me){if(d.human){dch.postMessage({type:'close',id:d.offerId,result:'cancelled'});d.human=false}d.s='idle';d.rider=null}S.me=null;S.dec=null;S.res=null;S.mlog=[];S.pin=null;S.dest=null;$('place').value='';$('dplace').value='';mode('pickup');refresh()};
+$('reset').onclick=()=>{if(S.me)S.q=S.q.filter(x=>x!==S.me);for(const d of S.drivers)if(d.s==='offered'&&d.rider&&d.rider.me){d.s='idle';d.rider=null}S.me=null;S.dec=null;S.res=null;S.mlog=[];S.pin=null;S.dest=null;$('place').value='';$('dplace').value='';mode('pickup');refresh()};
 
 /* ---- distance and fare ---- */
 const ORG={lat:10.8,lng:78.66},DLAT=0.00008983,DLNG=0.0000915,ROAD=1.3,KMH=25; // 1 grid px = 10 m
@@ -224,37 +206,35 @@ function renderEst(){$('book').textContent='Book '+VEH[S.veh].n;let a='',b='';
   if(a+b===estCache)return;estCache=a+b;$('est').innerHTML=a;$('veh').innerHTML=b}
 $('veh').onclick=e=>{const o=e.target.closest('.vo');if(o){S.veh=o.dataset.v;renderEst()}};
 
-/* ---- drawing ---- */
-const EMO={rider:'\u{1F987}',bike:'\u{1F3CD}\uFE0F',auto:'\u{1F6FA}',cab:'\u{1F697}'};
-function em(ch,x,y,size,flip){c.save();c.translate(x,y);if(flip)c.scale(-1,1);c.font=size+'px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif';c.textAlign='center';c.textBaseline='middle';c.fillText(ch,0,0);c.restore()}
+/* ---- drawing: no cars on the map until the driver accepts ---- */
 function draw(){
   c.fillStyle='#070914';c.fillRect(0,0,W,H);
   c.strokeStyle='rgba(120,140,255,.08)';c.lineWidth=1;c.beginPath();
   for(let x=0;x<=W;x+=CELL){c.moveTo(x,0);c.lineTo(x,H)}for(let y=0;y<=H;y+=CELL){c.moveTo(0,y);c.lineTo(W,y)}c.stroke();
   c.font='11px Sora,sans-serif';c.fillStyle='rgba(139,148,201,.8)';
   for(const k in PLACES){const[p,q]=PLACES[k];c.fillRect(p-2,q-2,4,4);c.fillText(k,p+6,q+4)}
-  const pin=S.me||S.pin,R=S.res,F=S.fare;
-  /* the map stays empty (no drivers, no other riders) until a driver accepts */
+  const pin=S.me||S.pin,R=S.res;
   if(S.dest){const q=S.dest;if(pin){c.strokeStyle='rgba(255,176,32,.6)';c.setLineDash([6,4]);c.beginPath();c.moveTo(pin.x,pin.y);c.lineTo(q.x,q.y);c.stroke();c.setLineDash([]);c.fillStyle='#ffb020';c.font='11px Sora,sans-serif';c.fillText((hav(pin,q)*ROAD).toFixed(1)+' km',(pin.x+q.x)/2+6,(pin.y+q.y)/2-6)}
     c.fillStyle='#ffb020';c.fillRect(q.x-6,q.y-6,12,12);c.fillStyle='#fff';c.font='bold 12px Sora,sans-serif';c.fillText('DROP',q.x+10,q.y+4)}
-  const riding=R&&S.t>=R.arrive,done=R&&riding&&R.d.s==='idle';
-  if(pin&&!riding){c.strokeStyle='rgba(255,255,255,.5)';c.lineWidth=2;c.beginPath();c.arc(pin.x,pin.y,20+Math.sin(S.t*5)*2,0,7);c.stroke();c.lineWidth=1;
-    em(EMO.rider,pin.x,pin.y,28);c.fillStyle='#fff';c.font='bold 12px Sora,sans-serif';c.fillText(S.me?'YOU':'Pickup',pin.x+24,pin.y+4)}
-  if(R&&F){const d=R.d,v=EMO[F.v],px=done&&S.dest?S.dest.x:d.x,py=done&&S.dest?S.dest.y:d.y,tx=riding&&S.dest?S.dest.x:pin.x;
-    if(!riding){c.strokeStyle='#2de2c4';c.lineWidth=2;c.setLineDash([5,4]);c.beginPath();c.moveTo(px,py);c.lineTo(pin.x,pin.y);c.stroke();c.setLineDash([]);c.lineWidth=1}
-    em(v,px,py,32,tx>=px);
-    if(riding)em(EMO.rider,px,py-24,20);
-    c.fillStyle='#2de2c4';c.font='bold 12px Sora,sans-serif';c.fillText(d.name,px+22,py+5)}}
+  if(R){
+    const d=R.d,toPick=S.t<R.arrive,done=!toPick&&d.s==='idle',tg=toPick?pin:S.dest;
+    if(!done){c.strokeStyle='rgba(45,226,196,.7)';c.lineWidth=3;c.setLineDash([8,6]);c.beginPath();c.moveTo(d.x,d.y);c.lineTo(tg.x,tg.y);c.stroke();c.setLineDash([]);c.lineWidth=1}
+    c.fillStyle=done?'#3dff7a':'#5b6bd6';c.globalAlpha=.3;c.beginPath();c.arc(d.x,d.y,15,0,7);c.fill();c.globalAlpha=1;
+    c.strokeStyle='#fff';c.lineWidth=2;c.beginPath();c.arc(d.x,d.y,9,0,7);c.fill();c.stroke();c.lineWidth=1;
+    c.font='bold 12px Sora,sans-serif';c.fillStyle='#e8ecff';c.fillText(d.name,d.x+14,d.y-10)}
+  if(pin){
+    if(S.me&&!R){const k=(S.t*.6)%1;c.strokeStyle='rgba(61,255,122,'+(1-k)+')';c.lineWidth=2;c.beginPath();c.arc(pin.x,pin.y,14+k*40,0,7);c.stroke();c.lineWidth=1}
+    c.strokeStyle='#fff';c.lineWidth=2;c.beginPath();c.arc(pin.x,pin.y,13+Math.sin(S.t*5)*2,0,7);c.stroke();c.lineWidth=1;
+    c.fillStyle='#fff';c.font='bold 12px Sora,sans-serif';c.fillText(S.me?'YOU':'Pickup',pin.x+17,pin.y+4)}}
 
-function panel(){renderEst();dstat();const o=$('out');if(!S.me){o.innerHTML='';return}
+function panel(){renderEst();const o=$('out');if(!S.me){o.innerHTML='';return}
   const d=S.dec,bat=S.engine==='batched',F=S.fare,R=S.res;
-  let stage=0,hd='Searching best driver...',sub=S.lastFail?S.lastFail+' Searching for the next best driver.':'Searching nearby grid cells for available drivers.';
-  if(S.me.pending&&d){stage=1;hd='Waiting for '+d.d.name+' to accept'+(d.d.human?' ('+Math.max(0,Math.ceil((d.d.deadline-performance.now())/1000))+'s left)':'');sub='Offer sent. The driver is locked so nobody else can be given them. Driver is '+d.pkm.toFixed(1)+' km away.'}
+  let stage=0,hd='Finding your driver',sub='Searching nearby grid cells for available drivers.';
+  if(S.me.pending&&d){stage=1;hd='Waiting for the driver to accept... '+Math.min(3,Math.floor((S.t-S.me.offerT)/2)+1)+'s';sub='Request sent to a nearby driver.'}
   if(R){const left=Math.max(0,R.arrive-S.t),mins=Math.max(1,Math.round(R.pkm/KMH*60*left/(R.travel||1)));
     if(S.t<R.arrive){stage=2;hd=R.d.name+' is arriving in '+mins+' min';sub='Driver is '+(R.pkm*left/(R.travel||1)).toFixed(1)+' km from your pickup.'}
     else if(R.d.s==='idle'){stage=4;hd='Trip completed';sub='Pay '+inr(F.tot)+' to '+R.d.name+'.'}
     else{stage=3;hd='Trip started';sub='Heading to your destination, '+F.km.toFixed(1)+' km.'}}
-  if(R&&R.human&&stage>=2&&S.sent!==stage){S.sent=stage;dch.postMessage({type:'status',id:R.offerId,stage})}
   const steps=['Finding','Offered','Arriving','On trip','Done'].map((t,i)=>'<span class="'+(i<=stage?'on':'')+'">'+t+'</span>').join('');
   let card='';if(R){const dr=R.d,pl='TN 45 '+String.fromCharCode(65+dr.id%26)+String.fromCharCode(65+dr.id*7%26)+' '+(1000+dr.id*379%9000);
     card='<div class="drv"><div class="av">'+dr.name[0]+'</div><div><b>'+dr.name+'</b><span>'+(4+dr.acc*.9).toFixed(1)+' rating, '+VEH[F.v].n+' '+pl+'</span></div><div class="otp"><span>OTP</span><b>'+(1000+(dr.id*7919+S.me.id*131)%9000)+'</b></div></div>'}
@@ -265,8 +245,7 @@ function panel(){renderEst();dstat();const o=$('out');if(!S.me){o.innerHTML='';r
     why='<details><summary>Why '+d.d.name+'? How the engine chose</summary><table><tr><th>Driver</th><th>ETA (sim)</th>'+(bat?'<th>Accept</th>':'')+'<th>Score (lower wins)</th></tr>'+rows+'</table>'+
     (bat?'<p>Best combined score of ETA divided by accept chance, minus bonuses for your waiting time (-'+d.me.wb.toFixed(2)+') and the driver\'s idle time (-'+d.me.ib.toFixed(2)+'). '+(d.lowest.x!==d.d?'Another driver scored lower for you alone, but the Hungarian solver gave that driver to another waiting rider because the total across everyone is smaller. ':'')+'The batch solved '+(d.lb?d.lb.n:'?')+' riders and '+(d.lb?d.lb.m:'?')+' drivers together.</p>'+(d.nearest&&d.nearest.x!==d.d?'<p>Nearest driver was '+d.nearest.x.name+'. Greedy would have picked that one.</p>':''):'<p>Closest available driver. Greedy ignores accept chance, idle time, and other riders.</p>')+
     '<p style="color:var(--mute)">'+d.avail+' of 60 drivers were available.</p></details>'}
-  const el=Math.floor(((R?R.rt:performance.now())-S.me.rt0)/1000),srch='<div class="srch"><span>'+(R?'Driver found in':'Searching time')+'</span><b>'+Math.floor(el/60)+':'+String(el%60).padStart(2,'0')+'</b><span>Offers sent: '+(S.attempt||0)+'</span></div>';
-  o.innerHTML='<div class="stg">'+steps+'</div>'+srch+'<div class="hd">'+hd+'</div><p>'+sub+'</p>'+card+fare+why+'<div class="lg">'+S.mlog.slice(-5).map(x=>'<p>'+x+'</p>').join('')+'</div>'}
+  o.innerHTML='<div class="stg">'+steps+'</div><div class="hd">'+hd+'</div><p>'+sub+'</p>'+card+fare+why+'<div class="lg">'+S.mlog.slice(-5).map(x=>'<p>'+x+'</p>').join('')+'</div>'}
 
 let last=performance.now(),f=0;
 function loop(now){const dt=Math.min(.1,(now-last)/1000)*2;last=now;let n=dt;

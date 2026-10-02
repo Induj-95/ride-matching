@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Driver app</title>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#070914;--panel:#0e1226;--line:#232a52;--ink:#e8ecff;--mute:#8b94c9;--idle:#2de2c4;--offer:#ffb020;--busy:#5b6bd6;--rider:#ff4d8d;--pick:#3dff7a;--bad:#ff6b6b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Sora,system-ui,sans-serif;padding:20px;max-width:1400px;margin-inline:auto}
+h1{font-size:clamp(24px,4vw,40px);font-weight:800;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 16px;max-width:75ch;line-height:1.5}
+.wrap{display:grid;grid-template-columns:3fr 2fr;gap:14px}
+@media(max-width:950px){.wrap{grid-template-columns:1fr}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+.card h2{margin:0 0 10px;font-size:17px}
+canvas{width:100%;height:auto;display:block;border-radius:6px;background:var(--bg)}
+button{font:inherit;font-weight:600;padding:12px 14px;border-radius:8px;border:1px solid var(--line);background:#161b3a;color:var(--ink);cursor:pointer;width:100%}
+button:hover{border-color:var(--idle)}
+button:focus-visible,a:focus-visible{outline:2px solid var(--offer);outline-offset:2px}
+button.go{background:var(--idle);color:#04110e;border-color:var(--idle)}
+button.no{border-color:var(--bad);color:var(--bad)}
+.row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.top{display:flex;align-items:center;gap:12px;margin-bottom:12px}
+.av{width:44px;height:44px;border-radius:50%;background:var(--busy);display:flex;align-items:center;justify-content:center;font-weight:800;font-size:18px;flex:none}
+.top b{display:block;font-size:16px}.top span{font-size:12px;color:var(--mute)}
+.sw{margin-left:auto;width:auto;padding:8px 14px;font-size:13px}
+.sw.on{background:var(--idle);color:#04110e;border-color:var(--idle)}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px}
+.stats div{background:#0a0e20;border-radius:8px;padding:8px}.stats b{display:block;font-size:18px}.stats span{font-size:11px;color:var(--mute)}
+.req{border:1px solid var(--offer);border-radius:12px;padding:14px;background:#161324}
+.req h3{margin:0 0 4px;font-size:18px}
+.cd{display:flex;align-items:baseline;justify-content:space-between;margin:6px 0}
+.cd b{font-size:34px;color:var(--offer)}.cd span{font-size:12px;color:var(--mute)}
+.bar{height:8px;background:#0a0e20;border-radius:99px;overflow:hidden;margin-bottom:12px}
+.bar i{display:block;height:100%;width:100%;background:var(--offer);transition:width .25s linear}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;font-size:13.5px;margin:10px 0 14px}
+.kv span{color:var(--mute)}.kv b{text-align:right}
+.big{font-size:22px;color:var(--idle)}
+.msg{background:#0a0e20;border-radius:10px;padding:14px;font-size:14px;line-height:1.5;color:var(--mute)}
+.msg b{color:var(--ink)}
+.stg{display:flex;gap:4px;margin:8px 0}.stg span{flex:1;text-align:center;font-size:11px;padding:6px 2px;border-radius:6px;background:#0a0e20;color:var(--mute)}.stg span.on{background:var(--idle);color:#04110e;font-weight:600}
+.hint{font-size:12px;color:var(--mute);line-height:1.5;margin:12px 0 0}
+a.lnk{display:block;text-align:center;margin-top:10px;color:var(--idle);font-size:13px}
+</style>
+</head>
+<body>
+<h1>Driver app</h1>
+<p class="sub">This is the driver's phone. When someone presses Book ride on the booking page, the request lands here. You have 15 seconds to accept. If you reject it or the time runs out, the booking page keeps searching and the request goes to the next best driver.</p>
+
+<div class="wrap">
+  <section class="card">
+    <h2>Map <small id="mapnote" style="color:var(--mute);font-weight:400;font-size:12px">waiting for a request</small></h2>
+    <canvas id="map"></canvas>
+  </section>
+  <section class="card">
+    <div class="top">
+      <div class="av" id="av">D</div>
+      <div><b id="who">Driver</b><span id="state">Online</span></div>
+      <button id="sw" class="sw on" type="button">Online</button>
+    </div>
+    <div class="stats">
+      <div><b id="sA">0</b><span>Accepted</span></div>
+      <div><b id="sR">0</b><span>Rejected</span></div>
+      <div><b id="sM">0</b><span>Missed</span></div>
+      <div><b id="sE">0</b><span>Earned</span></div>
+    </div>
+    <div id="area"></div>
+    <p class="hint">Demo mode: the matching engine decides which driver is offered each ride, and this page answers for that driver, so the name shown can change from one request to the next. Keep this tab open next to the booking page, both from the same site. If this page is closed or set to Offline, the booking page falls back to drivers that answer automatically.</p>
+    <a class="lnk" href="book.html" target="_blank">Open the booking page</a>
+  </section>
+</div>
+
+<script>
+const W=800,H=520,CELL=80,$=id=>document.getElementById(id);
+const PLACES={'Central Station':[400,260],'Tech Park':[130,110],'University':[560,170],'Airport Road':[700,90],'Old Market':[260,400],'Hospital':[650,420],'Beach Front':[90,450]};
+const ch=typeof BroadcastChannel!=='undefined'?new BroadcastChannel('ride-driver'):null;
+const cv=$('map'),c=cv.getContext('2d');cv.width=W;cv.height=H;
+const inr=n=>'\u20B9'+Math.round(n);
+let online=true,offer=null,trip=null,note='',st={acc:0,rej:0,miss:0,earn:0},lastKey='';
+
+function send(m){if(ch)ch.postMessage(m)}
+function hello(){send({type:'hello',online})}
+setInterval(hello,2000);hello();
+addEventListener('beforeunload',()=>send({type:'hello',online:false}));
+
+function acceptOffer(){if(!offer)return;send({type:'answer',id:offer.id,accept:true});st.acc++;trip={...offer,stage:1,done:false};offer=null;note='';render()}
+function rejectOffer(){if(!offer)return;send({type:'answer',id:offer.id,accept:false});st.rej++;offer=null;note='You rejected the request. The booking page is now searching for the next driver.';render()}
+function setOnline(v){online=v;if(!v&&offer)rejectOffer();hello();render()}
+
+if(ch)ch.onmessage=e=>{const m=e.data;if(!m)return;
+  if(m.type==='ping'){hello();return}
+  if(m.type==='offer'){if(!online)return;offer={...m,t0:performance.now()};trip=null;note='';render()}
+  else if(m.type==='close'&&offer&&offer.id===m.id){
+    if(m.result==='to'){st.miss++;note='Request expired. You did not respond in '+offer.sec+' seconds, so it went to another driver.'}
+    else note='The rider cancelled the request.';
+    offer=null;render()}
+  else if(m.type==='status'&&trip&&trip.id===m.id){trip.stage=m.stage;
+    if(m.stage===4&&!trip.done){trip.done=true;st.earn+=trip.fare;note='Trip completed. You earned '+inr(trip.fare)+'.'}
+    render()}};
+
+$('sw').onclick=()=>setOnline(!online);
+$('area').onclick=e=>{const b=e.target.closest('button');if(!b)return;if(b.id==='acc')acceptOffer();else if(b.id==='rej')rejectOffer()};
+
+function render(){
+  $('sw').textContent=online?'Online':'Offline';$('sw').className='sw'+(online?' on':'');
+  $('state').textContent=online?'Online, waiting for requests':'Offline, not receiving requests';
+  const name=(offer||trip)?(offer||trip).driver:'Driver';$('who').textContent=name;$('av').textContent=name[0];
+  $('sA').textContent=st.acc;$('sR').textContent=st.rej;$('sM').textContent=st.miss;$('sE').textContent=inr(st.earn);
+  let h='';
+  if(offer){const o=offer,pm=Math.max(1,Math.round(o.pkm/25*60));
+    h='<div class="req"><h3>New ride request</h3><div style="font-size:12px;color:var(--mute)">Offer '+o.attempt+' for this rider. Nobody else can be given this request while you decide.</div>'+
+      '<div class="cd"><b id="cdn">'+o.sec+'</b><span>seconds left to accept</span></div><div class="bar"><i id="cdb"></i></div>'+
+      '<div class="kv"><span>Pickup</span><b>'+o.pickup.name+'</b><span>Distance to pickup</span><b>'+o.pkm.toFixed(1)+' km, about '+pm+' min</b><span>Drop</span><b>'+o.dest.name+'</b><span>Trip distance</span><b>'+o.tkm.toFixed(1)+' km</b><span>Vehicle</span><b>'+o.veh+'</b><span>You earn</span><b class="big">'+inr(o.fare)+'</b></div>'+
+      '<div class="row"><button id="rej" class="no" type="button">Reject</button><button id="acc" class="go" type="button">Accept</button></div></div>'}
+  else if(trip){const s=trip.stage,lab=['Accepted','Accepted','Heading to pickup','On trip','Completed'];
+    h='<div class="stg">'+['Accepted','To pickup','On trip','Done'].map((t,i)=>'<span class="'+(i<=Math.max(0,s-1)?'on':'')+'">'+t+'</span>').join('')+'</div>'+
+      '<div class="msg"><b>'+(s>=4?'Trip completed':s===3?'Trip started':'You accepted. Head to the pickup.')+'</b><br>Pickup: '+trip.pickup.name+'<br>Drop: '+trip.dest.name+'<br>Trip '+trip.tkm.toFixed(1)+' km, you earn '+inr(trip.fare)+'.</div>'}
+  else h='<div class="msg"><b>'+(online?'You are online.':'You are offline.')+'</b><br>'+(note?note+'<br><br>':'')+(online?'Waiting for ride requests. Press Book ride on the booking page.':'Go online to receive requests.')+'</div>';
+  const key=h;if(key!==lastKey){lastKey=key;$('area').innerHTML=h}
+  $('mapnote').textContent=offer?'new request':trip?'your trip':'waiting for a request';
+  draw()}
+
+function draw(){
+  c.fillStyle='#070914';c.fillRect(0,0,W,H);
+  c.strokeStyle='rgba(120,140,255,.08)';c.lineWidth=1;c.beginPath();
+  for(let x=0;x<=W;x+=CELL){c.moveTo(x,0);c.lineTo(x,H)}for(let y=0;y<=H;y+=CELL){c.moveTo(0,y);c.lineTo(W,y)}c.stroke();
+  c.font='11px Sora,sans-serif';c.fillStyle='rgba(139,148,201,.8)';
+  for(const k in PLACES){const[p,q]=PLACES[k];c.fillRect(p-2,q-2,4,4);c.fillText(k,p+6,q+4)}
+  const o=offer||trip;if(!o){c.fillStyle='rgba(139,148,201,.9)';c.font='16px Sora,sans-serif';c.fillText('Waiting for ride requests...',W/2-110,H/2);return}
+  c.strokeStyle='#2de2c4';c.lineWidth=2.5;c.beginPath();c.moveTo(o.dx,o.dy);c.lineTo(o.pickup.x,o.pickup.y);c.stroke();c.lineWidth=1;
+  c.strokeStyle='rgba(255,176,32,.7)';c.setLineDash([6,4]);c.beginPath();c.moveTo(o.pickup.x,o.pickup.y);c.lineTo(o.dest.x,o.dest.y);c.stroke();c.setLineDash([]);
+  c.fillStyle='#2de2c4';c.beginPath();c.arc(o.dx,o.dy,8,0,7);c.fill();c.fillStyle='#e8ecff';c.font='bold 12px Sora,sans-serif';c.fillText('YOU',o.dx+12,o.dy+4);
+  c.strokeStyle='#fff';c.lineWidth=2;c.beginPath();c.arc(o.pickup.x,o.pickup.y,13,0,7);c.stroke();c.lineWidth=1;c.fillStyle='#fff';c.fillText('PICKUP',o.pickup.x+17,o.pickup.y+4);
+  c.fillStyle='#ffb020';c.fillRect(o.dest.x-6,o.dest.y-6,12,12);c.fillStyle='#fff';c.fillText('DROP',o.dest.x+10,o.dest.y+4)}
+
+setInterval(()=>{ // countdown only, so the buttons are never rebuilt under the cursor
+  if(!offer)return;const left=offer.sec-(performance.now()-offer.t0)/1000;
+  if(left<=0){st.miss++;note='Request expired. You did not respond in '+offer.sec+' seconds, so it went to another driver.';offer=null;render();return}
+  const n=$('cdn'),b=$('cdb');if(n)n.textContent=Math.ceil(left);if(b)b.style.width=(left/offer.sec*100)+'%'},200);
+render();
+</script>
+</body>
+</html>

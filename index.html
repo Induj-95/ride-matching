@@ -28,7 +28,7 @@ button.go{background:var(--idle);color:#04110e;border-color:var(--idle)}
 .card h2{margin:0 0 8px;font-size:18px}
 .card h2 small{color:var(--mute);font-weight:400;font-size:12px;margin-left:8px}
 canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914;cursor:crosshair}
-.m{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:10px}
+.m{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-top:10px}
 @media(max-width:700px){.m{grid-template-columns:repeat(3,1fr)}}
 .m div{background:#0a0e20;border-radius:6px;padding:8px}
 .m b{display:block;font-size:19px}
@@ -58,6 +58,13 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
 .fgrid tr.tot td{font-weight:800;font-size:17px;color:var(--idle);border:0}
 .fgrid .eq{background:#0a0e20;border-radius:6px;padding:8px 10px;font:12.5px/1.6 ui-monospace,Consolas,monospace;color:var(--mute)}
 .frow{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:8px 0}
+.race pre{background:#0a0e20;border-radius:6px;padding:10px 12px;font:12.5px/1.6 ui-monospace,Consolas,monospace;color:var(--mute);overflow:auto;margin:6px 0}
+.race pre b{color:var(--idle);font-weight:600}
+.race .two{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:900px){.race .two{grid-template-columns:1fr}}
+.race table{width:100%;border-collapse:collapse;font-size:13.5px;margin:10px 0}
+.race td,.race th{padding:6px 8px;text-align:left;border-bottom:1px solid var(--line)}.race th{color:var(--mute);font-weight:400}
+.race td.bad{color:var(--offer);font-weight:600}.race td.good{color:var(--idle);font-weight:600}
 .pop{position:fixed;left:50%;bottom:14px;transform:translateX(-50%);width:min(700px,calc(100% - 24px));background:#10163a;border:1px solid var(--idle);border-radius:12px;padding:16px;z-index:10;box-shadow:0 10px 40px rgba(0,0,0,.65);display:none;max-height:58vh;overflow:auto}
 .pop h3{margin:0 0 6px;font-size:18px}
 .pop .why{margin:0 0 8px;font-size:14px;line-height:1.5}
@@ -73,7 +80,7 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
 <h1>Who gets the ride?</h1>
 <p class="sub">The same riders and drivers run through two engines. Greedy gives each rider the nearest driver in arrival order. Batched collects requests for 2 seconds, then solves one optimal assignment (Hungarian algorithm), weighing wait time, surge priority and each driver's chance of accepting.</p>
 
-<p class="note" id="ver">Build v9: fare explanation, destinations from the booking page, named places (same as the booking page). Pins sent from book.html appear as Request a ride.</p>
+<p class="note" id="ver">Build v11: atomic claim demo,  speed numbers, full-engine stress test, offline drivers, fare explanation, destinations from the booking page, named places (same as the booking page). Pins sent from book.html appear as Request a ride.</p>
 <div class="bar">
   <label>Demand: <span id="rv">2.5</span> riders/sec<input id="rate" type="range" min="0.5" max="6" step="0.5" value="2.5"></label>
   <label>Sim speed: <span id="sv">2</span>x<input id="speed" type="range" min="1" max="4" step="1" value="2"></label>
@@ -93,6 +100,7 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
   <span><i style="background:var(--idle)"></i>Idle driver</span>
   <span><i style="background:var(--offer)"></i>Offer sent, driver locked</span>
   <span><i style="background:var(--busy)"></i>On a trip</span>
+  <span><i style="background:#555b7a"></i>Offline</span>
   <span><i style="background:var(--rider)"></i>Waiting rider</span>
   <span>Click any driver to inspect it</span>
 </div>
@@ -139,6 +147,33 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
   </div>
 </div>
 
+<div class="card race" id="race">
+  <h2>The atomic claim <small>why a driver can never be given to two riders</small></h2>
+  <p class="note" style="font-size:14px;line-height:1.55;margin:0 0 8px">Two riders ask for the same driver at almost the same moment. If the system first looks ("is the driver free?") and then marks the driver taken a moment later, both riders can see "free" in the gap. The atomic way does the look and the mark as one step nobody can interrupt.</p>
+  <div class="two">
+    <div><b>Careless: check, then set</b>
+<pre>if driver is AVAILABLE:
+    <b>...wait (network, database)...</b>
+    driver = OFFERED   // too late</pre></div>
+    <div><b>Atomic: check and set as one step</b>
+<pre>if driver is AVAILABLE:
+    driver = OFFERED   // no gap
+    return won
+else:
+    return blocked</pre></div>
+  </div>
+  <p class="note" style="font-size:13px;line-height:1.5">The engine above uses the atomic form (its claim step). In production the same step is one Redis Lua script, which Redis runs without letting anything in between:</p>
+<pre>if redis.call('GET', KEYS[1]) == 'AVAILABLE' then
+  redis.call('SET', KEYS[1], 'OFFERED', 'EX', 15)  -- lock expires in 15s
+  return 1
+else
+  return 0
+end</pre>
+  <button id="raceBtn" class="go" type="button">Run the race: 5,000 requests, 200 drivers</button>
+  <div id="raceout" class="note" style="font-size:14px;margin-top:10px">Press the button. Requests arrive at random moments over about 400 ms, and the careless version waits up to 4 ms between looking and marking, like a round trip to a database. It takes a moment to run.</div>
+  <p class="note" style="font-size:12.5px;line-height:1.5">What this demo is: many requests interleaving in the browser, which is the same race a server has when it reads from a database and writes back later. What it is not: separate CPU threads or a real Redis. For real parallel threads, run <b>concurrency_test.js</b> with Node. In one run on a 16-core computer it gave: careless 13 drivers double-assigned, atomic 0.</p>
+</div>
+
 <div class="card" id="stress">Press <b>Run stress test</b> to fire 5,000 simultaneous requests at 200 drivers and check for double assignments.</div>
 <p class="note">Driver lock = atomic claim: set OFFERED only if currently AVAILABLE, with a timeout. In production this is one Redis Lua script. The spatial index here is a square grid, the same idea as H3 hex cells.</p>
 
@@ -165,7 +200,7 @@ class Sim{
     const r=rng(7);this.rs=rng(11);this.ra=rng(13);this.t=0;this.nextBatch=2;this.nh=2;this.nid=0;this.sp=0;this.q=[];this.log=[];this.hist=[];this.recent=[];
     this.heat=Array(11*8).fill(0);this.me=null;this.mm=null;this.mt=[];
     this.drivers=[...Array(60)].map((_,i)=>({id:i,name:NAMES[i],x:r()*W,y:r()*H,s:'idle',since:0,idle:0,trips:0,acc:.55+r()*.4,until:0,cool:0,rider:null,fate:'acc'}));
-    this.m={served:0,sum:0,rej:0,to:0,cancel:0,dbl:0,blocked:0};
+    this.m={served:0,sum:0,rej:0,to:0,cancel:0,dbl:0,blocked:0};this.bs={n:0,sum:0,max:0};
     this.ctx.fillStyle='#070914';this.ctx.fillRect(0,0,W,H)}
   say(s){this.log.push(this.t.toFixed(0).padStart(3)+'s  '+s);if(this.log.length>5)this.log.shift()}
   tr(r,s){if(r&&r.me)this.mt.push(this.t.toFixed(1).padStart(5)+'s  '+s)}
@@ -186,7 +221,7 @@ class Sim{
     sel={sim:this,id:d.id};
     const nAvail=this.drivers.filter(x=>x.s==='idle'&&x.cool<=t).length;
     const rk=[...c].sort((a,b)=>a.cost-b.cost);const cands=c.map(z=>({x:z.x,eta:z.eta,avail:true,why:'',ch:z.x===d,rk:rk.indexOf(z)+1}));
-    const oth=this.drivers.filter(x=>x!==d&&!(x.s==='idle'&&x.cool<=t)).map(x=>({x,eta:Math.hypot(x.x-r.x,x.y-r.y)/SPEED,avail:false,ch:false,why:x.s==='busy'?'on a trip':x.s==='offered'?'locked by another offer':'resting after no response'})).sort((a,b)=>a.eta-b.eta).slice(0,3);
+    const oth=this.drivers.filter(x=>x!==d&&!(x.s==='idle'&&x.cool<=t)).map(x=>({x,eta:Math.hypot(x.x-r.x,x.y-r.y)/SPEED,avail:false,ch:false,why:x.s==='busy'?'on a trip':x.s==='offered'?'locked by another offer':x.s==='off'?'offline':'resting after no response'})).sort((a,b)=>a.eta-b.eta).slice(0,3);
     explQ.push({sim:this,d,r,cands:[...cands,...oth],html:'<p class="why">'+why+'</p><table>'+head+rows+'</table><p class="note">'+nAvail+' of '+this.drivers.length+' drivers are available. Not available nearby: '+oth.map(o=>o.x.name+' ('+o.why+')').join(', ')+'.</p><ul>'+li+'</ul><p class="note">Next: '+d.name+' is locked for this offer. No other rider can be given this driver until they accept, reject, or time out.</p>'})}
   request(x,y,dest){const r={id:this.nid++,x,y,dest,t0:this.t,tried:new Set(),pending:false,sg:opt.surge&&Math.hypot(x-ZX,y-ZY)<ZR,me:true};this.me=r;this.mm=null;this.mt=[];this.q.push(r);this.tr(r,'Ride requested at your pin. Searching nearby grid cells for available drivers.')}
   index(){const g=new Map();for(const d of this.drivers)if(d.s==='idle'&&this.t>=d.cool){const k=(d.x/CELL|0)+','+(d.y/CELL|0);if(!g.has(k))g.set(k,[]);g.get(k).push(d)}return g}
@@ -230,14 +265,14 @@ class Sim{
         if(this.t>=d.until){d.s='idle';d.since=this.t;d.x=d.drop.x;d.y=d.drop.y;d.rider=null}
         else if(this.t<d.t1){const f=(this.t-d.t0)/(d.t1-d.t0||1);d.x=d.from.x+(d.pick.x-d.from.x)*f;d.y=d.from.y+(d.pick.y-d.from.y)*f}
         else{const f=(this.t-d.t1)/(d.until-d.t1);d.x=d.pick.x+(d.drop.x-d.pick.x)*f;d.y=d.pick.y+(d.drop.y-d.pick.y)*f}
-      }else if(d.s==='idle'){const h=d.id*1.7+Math.sin(this.t*.3+d.id)*2;d.x=Math.min(W,Math.max(0,d.x+Math.cos(h)*10*dt));d.y=Math.min(H,Math.max(0,d.y+Math.sin(h)*10*dt))}}
+      }else if(d.s==='off'){if(!((this.t+d.id*7)%90>70)){d.s='idle';d.since=this.t}}else if(d.s==='idle'){if(d.id%6===0&&(this.t+d.id*7)%90>70){d.s='off';continue}}}
     const b=this.q.length;this.q=this.q.filter(r=>r.pending||r.me||this.t-r.t0<30);this.m.cancel+=b-this.q.length;
     if(this.mm&&!this.mm.done&&this.t>=this.mm.d.t1){this.mm.done=true;this.tr(this.me,this.mm.d.name+' arrived. Total wait '+(this.t-this.me.t0).toFixed(1)+'s.')}
     if(this.t>=this.nh){this.nh+=2;this.hist.push(this.recent.length?this.recent.reduce((a,c)=>a+c,0)/this.recent.length:null);if(this.hist.length>150)this.hist.shift()}
-    if(this.mode==='greedy'){const g=this.index();for(const r of this.q){if(r.pending)continue;
+    if(this.mode==='greedy'){const T0=performance.now();const g=this.index();for(const r of this.q){if(r.pending)continue;
       const c=this.near(g,r.x,r.y,3).filter(d=>d.s==='idle'&&!r.tried.has(d.id));if(!c.length)continue;
-      c.sort((a,b)=>Math.hypot(a.x-r.x,a.y-r.y)-Math.hypot(b.x-r.x,b.y-r.y));this.claim(c[0],r)}}
-    else if(this.t>=this.nextBatch){this.nextBatch=this.t+2;this.batch()}}
+      c.sort((a,b)=>Math.hypot(a.x-r.x,a.y-r.y)-Math.hypot(b.x-r.x,b.y-r.y));this.claim(c[0],r)}if(this.q.length)this.timed(T0)}
+    else if(this.t>=this.nextBatch){this.nextBatch=this.t+2;const T0=performance.now();this.batch();this.timed(T0)}}
   batch(){
     const g=this.index();let rs=this.q.filter(r=>!r.pending).slice(0,30);if(!rs.length)return;
     const cand=new Map(),allow=[];
@@ -250,6 +285,7 @@ class Sim{
       a.push(row)}
     this.lb={n,m};const p=hung(a,n,m);
     for(let j=1;j<=m;j++)if(p[j]&&a[p[j]][j]<1e3)this.claim(ds[j-1],rs[p[j]-1])}
+  timed(T0){const d=performance.now()-T0;this.bs.n++;this.bs.sum+=d;if(d>this.bs.max)this.bs.max=d}
   jain(){const x=this.drivers.map(d=>d.trips),s=x.reduce((a,b)=>a+b,0),s2=x.reduce((a,b)=>a+b*b,0);return s2?s*s/(x.length*s2):1}
   draw(){
     const c=this.ctx;c.fillStyle='rgba(7,9,20,.22)';c.fillRect(0,0,W,H);
@@ -262,7 +298,7 @@ class Sim{
     for(const d of this.drivers){
       if(d.s==='offered'&&d.rider){c.strokeStyle='#ffb020';c.setLineDash([4,4]);c.beginPath();c.moveTo(d.x,d.y);c.lineTo(d.rider.x,d.rider.y);c.stroke();c.setLineDash([])}
       if(d.s==='busy'&&this.t<d.t1){c.strokeStyle='rgba(45,226,196,.6)';c.beginPath();c.moveTo(d.x,d.y);c.lineTo(d.pick.x,d.pick.y);c.stroke()}
-      c.fillStyle=d.s==='idle'?'#2de2c4':d.s==='offered'?'#ffb020':'#5b6bd6';c.beginPath();c.arc(d.x,d.y,5,0,7);c.fill();if(opt.names){c.fillStyle='rgba(232,236,255,.6)';c.font='10px Sora,sans-serif';c.fillText(d.id,d.x+7,d.y+3)}
+      c.fillStyle=d.s==='idle'?'#2de2c4':d.s==='offered'?'#ffb020':d.s==='off'?'#555b7a':'#5b6bd6';c.beginPath();c.arc(d.x,d.y,5,0,7);c.fill();if(opt.names){c.fillStyle='rgba(232,236,255,.6)';c.font='10px Sora,sans-serif';c.fillText(d.id,d.x+7,d.y+3)}
       if(sel&&sel.sim===this&&sel.id===d.id){c.strokeStyle='#fff';c.lineWidth=1.5;c.beginPath();c.arc(d.x,d.y,11,0,7);c.stroke();c.lineWidth=1}}}
   drawMe(){const r=this.me;if(!r)return;const c=this.ctx;
     if(r.dest){c.fillStyle='#ffb020';c.fillRect(r.dest.x-6,r.dest.y-6,12,12);c.fillStyle='#fff';c.font='bold 12px Sora,sans-serif';c.fillText('DROP',r.dest.x+10,r.dest.y+4)}
@@ -272,8 +308,8 @@ class Sim{
     if(expl&&expl.sim===this){expl.cands.forEach(z=>{const ch=z.ch,x=z.x.x,y=z.x.y;c.strokeStyle=ch?'#3dff7a':z.avail?'rgba(255,255,255,.55)':'rgba(139,148,201,.35)';c.setLineDash(ch?[]:[3,4]);c.lineWidth=ch?2.5:1;c.beginPath();c.moveTo(r.x,r.y);c.lineTo(x,y);c.stroke();c.setLineDash([]);c.lineWidth=1;
       if(ch){c.fillStyle='#3dff7a';c.beginPath();c.arc(x,y,8,0,7);c.fill();c.strokeStyle='#fff';c.lineWidth=2;c.beginPath();c.arc(x,y,12,0,7);c.stroke();c.lineWidth=1}
       c.font='bold 13px Sora,sans-serif';c.fillStyle=ch?'#3dff7a':z.avail?'#e8ecff':'#8b94c9';c.fillText(z.x.id,x+14,y-8)})}}
-  stats(el,lg){const m=this.m,avg=m.served?(m.sum/m.served).toFixed(1):'-';
-    const rows=[[avg+'s','Avg pickup time'],[m.served,'Rides served'],[this.q.length,'Waiting now'],[m.rej+' / '+m.to,'Rejected / timed out'],[m.cancel,'Riders gave up'],[this.jain().toFixed(2),'Fairness (1 = even)']];
+  stats(el,lg){const m=this.m,avg=m.served?(m.sum/m.served).toFixed(1):'-',bs=this.bs,mt=bs.n?(bs.sum/bs.n).toFixed(2)+' / '+bs.max.toFixed(1)+' ms':'-';
+    const rows=[[avg+'s','Avg pickup time'],[m.served,'Rides served'],[this.q.length,'Waiting now'],[m.rej+' / '+m.to,'Rejected / timed out'],[m.cancel,'Riders gave up'],[this.jain().toFixed(2),'Fairness (1 = even)'],[mt,'Match time per round (avg / max)']];
     el.innerHTML=rows.map(r=>'<div><b>'+r[0]+'</b><span>'+r[1]+'</span></div>').join('');
     lg.innerHTML=this.log.map(s=>'<p>'+s+'</p>').join('')||'<p>Waiting for events...</p>'}
 }
@@ -294,7 +330,7 @@ let armed=false;$('reqBtn').onclick=e=>{armed=true;e.target.textContent='Now cli
 function inspect(){const el=$('drv');if(!sel){el.innerHTML='Click a driver dot on either map.';return}
   const d=sel.sim.drivers[sel.id],t=sel.sim.t,st=d.s;
   const pill=(k,l,c)=>'<span class="'+(st===k?'on':'')+'" style="--c:'+c+'">'+l+'</span>';
-  el.innerHTML='<b>'+sel.sim.name+' engine, '+d.name+' (driver '+d.id+')</b><div class="pills">'+pill('idle','AVAILABLE','#2de2c4')+pill('offered','OFFERED (locked)','#ffb020')+pill('busy','BUSY','#8b9bff')+'</div>'+
+  el.innerHTML='<b>'+sel.sim.name+' engine, '+d.name+' (driver '+d.id+')</b><div class="pills">'+pill('idle','AVAILABLE','#2de2c4')+pill('offered','OFFERED (locked)','#ffb020')+pill('busy','BUSY','#8b9bff')+pill('off','OFFLINE','#555b7a')+'</div>'+
    'Accept chance: '+(d.acc*100|0)+'%<br>Trips done: '+d.trips+'<br>'+(st==='offered'?'Lock expires in '+Math.max(0,d.until-t).toFixed(1)+'s<br>':'')+(st==='busy'?'Free in '+Math.max(0,d.until-t).toFixed(0)+'s<br>':'')+(d.cool>t?'Cooling down after a no-response':'')}
 
 function chart(){const cv=$('chart'),c=cv.getContext('2d');cv.width=1000;cv.height=240;c.clearRect(0,0,1000,240);
@@ -306,7 +342,7 @@ function chart(){const cv=$('chart'),c=cv.getContext('2d');cv.width=1000;cv.heig
     c.fillStyle=col;c.fillText(nm,60+k*90,236)})}
 
 function around(s){const r=s.me,t=s.t;const L=s.drivers.map(d=>({d,e:Math.hypot(d.x-r.x,d.y-r.y)/SPEED})).sort((a,b)=>a.e-b.e).slice(0,6);
-  return '<p style="margin-top:8px;color:#e8ecff">Drivers around you:</p>'+L.map(o=>'<p>'+o.d.name+' | '+o.e.toFixed(1)+'s away | '+(s.mm&&s.mm.d===o.d?'YOUR DRIVER':o.d.s==='idle'?(o.d.cool>t?'resting':'available'):o.d.s==='offered'?'locked for an offer':'on a trip')+'</p>').join('')}
+  return '<p style="margin-top:8px;color:#e8ecff">Drivers around you:</p>'+L.map(o=>'<p>'+o.d.name+' | '+o.e.toFixed(1)+'s away | '+(s.mm&&s.mm.d===o.d?'YOUR DRIVER':o.d.s==='idle'?(o.d.cool>t?'resting':'available'):o.d.s==='offered'?'locked for an offer':o.d.s==='off'?'offline':'on a trip')+'</p>').join('')}
 function showExplain(){const e=expl,s=e.sim,cv=s.cv;
   $('pop').innerHTML='<h3>Why '+e.d.name+'? <small style="color:var(--mute);font-weight:400">'+s.name+' engine</small></h3>'+e.html+'<button id="cont" class="go">Continue simulation</button>';
   $('pop').style.display='block';cv.scrollIntoView({behavior:'smooth',block:'center'});
@@ -346,6 +382,22 @@ $('fveh').onchange=fareBox;$('fkm').oninput=fareBox;
 $('fuse').onclick=()=>{if(B.me&&B.me.dest){$('fkm').value=Math.min(12,Math.max(.5,hav(B.me,B.me.dest)*ROAD)).toFixed(1);fareBox()}};
 fareBox();
 
+/* Race demo: careless check-then-set vs atomic claim */
+$('raceBtn').onclick=()=>{
+  const out=$('raceout');out.textContent='Running...';const D=200,N=5000;
+  const run=atomic=>new Promise(res=>{
+    const st=new Int8Array(D),wins=new Int16Array(D);let done=0,blocked=0;
+    const fin=()=>{let got=0,dbl=0,extra=0;for(let k=0;k<D;k++){if(wins[k]>0)got++;if(wins[k]>1){dbl++;extra+=wins[k]-1}}res({got,dbl,extra,blocked})};
+    for(let i=0;i<N;i++){const d=Math.random()*D|0;
+      setTimeout(()=>{
+        if(st[d]!==0){blocked++;if(++done===N)fin();return}
+        if(atomic){st[d]=1;wins[d]++;if(++done===N)fin()}
+        else setTimeout(()=>{st[d]=1;wins[d]++;if(++done===N)fin()},Math.random()*4)
+      },Math.random()*400)}});
+  run(false).then(a=>run(true).then(b=>{
+    const row=(n,x,c)=>'<tr><td>'+n+'</td><td>'+x.got+'</td><td class="'+c+'">'+x.dbl+' ('+x.extra+' extra)</td><td>'+x.blocked.toLocaleString()+'</td></tr>';
+    out.innerHTML='<table><tr><th>Method</th><th>Drivers claimed</th><th>Given to more than one rider</th><th>Requests blocked</th></tr>'+row('Careless: check, then set',a,a.dbl?'bad':'good')+row('Atomic: one step',b,b.dbl?'bad':'good')+'</table>'}))};
+
 /* Connection to book.html: a pin sent from the booking page becomes a Request a ride on both maps */
 if(typeof BroadcastChannel!=='undefined'){
   const ch=new BroadcastChannel('ride-pin');
@@ -353,14 +405,26 @@ if(typeof BroadcastChannel!=='undefined'){
 }
 
 $('stressBtn').onclick=()=>{
-  const s=new Sim(document.createElement('canvas'),'greedy','test');s.t=100;
-  s.drivers=[...Array(200)].map((_,i)=>({id:i,x:Math.random()*W,y:Math.random()*H,s:'idle',since:0,cool:0,acc:.8}));
-  const g=s.index(),count={};let claimed=0;const N=5000;
-  for(let i=0;i<N;i++){const r={x:Math.random()*W,y:Math.random()*H,tried:new Set()};
-    const c=s.near(g,r.x,r.y,3);if(!c.length)continue;const d=c[Math.random()*c.length|0];
-    if(s.claim(d,r)){claimed++;count[d.id]=(count[d.id]||0)+1}}
-  const dbl=Object.values(count).filter(v=>v>1).length;
-  $('stress').innerHTML='<b>Double assignments: '+dbl+'</b><br>'+N.toLocaleString()+' requests hit 200 drivers at once. '+claimed+' claims succeeded, one per driver. The atomic check blocked '+s.m.blocked.toLocaleString()+' collisions, so no driver was given to two riders.'};
+  $('stress').textContent='Running both tests...';
+  setTimeout(()=>{
+    /* Test 1: many requests grab the same drivers at once, only the atomic claim decides */
+    const s=new Sim(document.createElement('canvas'),'greedy','test');s.t=100;
+    s.drivers=[...Array(200)].map((_,i)=>({id:i,x:Math.random()*W,y:Math.random()*H,s:'idle',since:0,cool:0,acc:.8}));
+    const g=s.index(),count={};let claimed=0;const N=5000;
+    for(let i=0;i<N;i++){const r={x:Math.random()*W,y:Math.random()*H,tried:new Set()};
+      const c=s.near(g,r.x,r.y,3);if(!c.length)continue;const d=c[Math.random()*c.length|0];
+      if(s.claim(d,r)){claimed++;count[d.id]=(count[d.id]||0)+1}}
+    const dbl=Object.values(count).filter(v=>v>1).length;
+    /* Test 2: the whole batched engine (grid search, Hungarian, claims, rejects, timeouts) on 5,000 waiting riders */
+    const e=new Sim(document.createElement('canvas'),'batched','test2');
+    e.drivers=[...Array(200)].map((_,i)=>({id:i,name:'D'+i,x:Math.random()*W,y:Math.random()*H,s:'idle',since:0,idle:0,trips:0,acc:.55+Math.random()*.4,until:0,cool:0,rider:null,fate:'acc'}));
+    for(let i=0;i<N;i++)e.q.push({id:e.nid++,x:Math.random()*W,y:Math.random()*H,t0:0,tried:new Set(),pending:false,sg:false});
+    const t0=performance.now();while(e.t<30)e.tick(.05,0);
+    const ms=performance.now()-t0,bs=e.bs,off=e.drivers.filter(d=>d.s==='offered'),uniq=new Set(off.map(d=>d.rider.id)).size===off.length;
+    const rate=ms>0?Math.round(e.m.served/(ms/1000)):0;
+    $('stress').innerHTML='<b>Double assignments: '+(dbl+e.m.dbl+(uniq?0:1))+'</b><br>'+
+      '<b style="font-size:15px">Test 1, atomic claim:</b> '+N.toLocaleString()+' requests hit 200 drivers at once. '+claimed+' claims succeeded, one per driver. The atomic check blocked '+s.m.blocked.toLocaleString()+' collisions.<br>'+
+      '<b style="font-size:15px">Test 2, whole engine:</b> '+N.toLocaleString()+' waiting riders, 200 drivers, 30 simulated seconds. '+e.m.served+' rides matched, '+e.m.rej+' rejected, '+e.m.to+' timed out and were re-offered, '+e.m.cancel+' riders gave up. '+bs.n+' batch rounds took '+(bs.sum/bs.n).toFixed(2)+' ms on average and '+bs.max.toFixed(1)+' ms at worst. Computing all of this took '+ms.toFixed(0)+' ms on one browser thread, about '+rate.toLocaleString()+' matches per second of computing. Each round solves at most 30 riders, so most of the 5,000 give up. A real system would run many engines side by side, one per city zone.'},30)};
 </script>
 </body>
 </html>
