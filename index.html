@@ -43,6 +43,8 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
 #stress{margin-top:14px;font-size:15px;line-height:1.6}
 #stress b{color:var(--idle);font-size:22px}
 .note{color:var(--mute);font-size:12px;margin-top:8px}
+.tr p{margin:0 0 4px;font:12.5px/1.5 ui-monospace,Consolas,monospace;color:var(--mute)}
+.tr .hd{font-weight:600;color:var(--idle);margin-bottom:8px;font-size:16px}
 </style>
 </head>
 <body>
@@ -55,6 +57,7 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
   <label class="ck"><input id="surge" type="checkbox">&nbsp;Surge zone</label>
   <label class="ck"><input id="heat" type="checkbox" checked>&nbsp;Demand heatmap</label>
   <button id="layout">Stack maps</button>
+  <button id="reqBtn">Request a ride</button>
   <button id="reset">Reset both</button>
   <button id="stressBtn" class="go">Run stress test (5,000)</button>
 </div>
@@ -72,6 +75,10 @@ canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914
   <section class="card"><h2>Batched <small>2s window, Hungarian optimal assignment</small></h2><canvas id="c2"></canvas><div class="m" id="m2"></div><div class="log" id="l2"></div></section>
 </div>
 
+<div class="grid" style="margin-top:14px">
+  <section class="card tr"><h2>Your ride: Greedy <small>how this engine picks your driver</small></h2><div id="t1"></div></section>
+  <section class="card tr"><h2>Your ride: Batched <small>how this engine picks your driver</small></h2><div id="t2"></div></section>
+</div>
 <div class="row2">
   <div class="card"><h2>Average pickup time over time <small>lower is better</small></h2><canvas id="chart" style="cursor:default"></canvas></div>
   <div class="card"><h2>Driver inspector</h2><div id="drv" class="note">Click a driver dot on either map.</div></div>
@@ -99,11 +106,13 @@ class Sim{
   constructor(cv,mode,name){cv.width=W;cv.height=H;this.cv=cv;this.ctx=cv.getContext('2d');this.mode=mode;this.name=name;this.reset()}
   reset(){
     const r=rng(7);this.rs=rng(11);this.ra=rng(13);this.t=0;this.nextBatch=2;this.nh=2;this.nid=0;this.sp=0;this.q=[];this.log=[];this.hist=[];this.recent=[];
-    this.heat=Array(11*8).fill(0);
+    this.heat=Array(11*8).fill(0);this.me=null;this.mm=null;this.mt=[];
     this.drivers=[...Array(60)].map((_,i)=>({id:i,x:r()*W,y:r()*H,s:'idle',since:0,idle:0,trips:0,acc:.55+r()*.4,until:0,cool:0,rider:null,fate:'acc'}));
     this.m={served:0,sum:0,rej:0,to:0,cancel:0,dbl:0,blocked:0};
     this.ctx.fillStyle='#070914';this.ctx.fillRect(0,0,W,H)}
   say(s){this.log.push(this.t.toFixed(0).padStart(3)+'s  '+s);if(this.log.length>5)this.log.shift()}
+  tr(r,s){if(r&&r.me)this.mt.push(this.t.toFixed(1).padStart(5)+'s  '+s)}
+  request(x,y){const r={id:this.nid++,x,y,t0:this.t,tried:new Set(),pending:false,sg:false,me:true};this.me=r;this.mm=null;this.mt=[];this.q.push(r);this.tr(r,'Ride requested at your pin. Searching nearby grid cells for available drivers.')}
   index(){const g=new Map();for(const d of this.drivers)if(d.s==='idle'&&this.t>=d.cool){const k=(d.x/CELL|0)+','+(d.y/CELL|0);if(!g.has(k))g.set(k,[]);g.get(k).push(d)}return g}
   near(g,x,y,k){const cx=x/CELL|0,cy=y/CELL|0,out=[];
     for(let R=0;R<=9;R++){
@@ -114,6 +123,9 @@ class Sim{
     if(d.s!=='idle'){this.m.blocked++;return false}
     const dist=Math.hypot(d.x-r.x,d.y-r.y),p=d.acc*(dist>250?.7:1),u=this.ra();
     d.fate=u<p?'acc':(u<p+(1-p)*.4?'to':'rej');
+    if(r.me){const nb=this.drivers.filter(x=>x.s==='idle'&&x.cool<=this.t).map(x=>[x,Math.hypot(x.x-r.x,x.y-r.y)/SPEED]).sort((a,b)=>a[1]-b[1]).slice(0,3);
+      this.tr(r,'Nearest available: '+nb.map(z=>'D'+z[0].id+' '+z[1].toFixed(1)+'s').join(', '));
+      this.tr(r,'Engine chose Driver '+d.id+' (ETA '+(dist/SPEED).toFixed(1)+'s, accept chance '+(p*100|0)+'%). Driver locked while the offer is open.')}
     d.s='offered';d.rider=r;d.until=this.t+(d.fate==='to'?4:1.2);r.pending=true;r.tried.add(d.id);return true}
   resolve(d){
     const r=d.rider;
@@ -124,9 +136,11 @@ class Sim{
       d.t0=this.t;d.t1=this.t+travel;d.until=d.t1+8+this.ra()*8;d.trips++;d.idle+=this.t-d.since;
       const eta=(this.t-r.t0)+travel;this.m.served++;this.m.sum+=eta;this.recent.push(eta);if(this.recent.length>15)this.recent.shift();
       this.q=this.q.filter(x=>x!==r);this.say('Driver '+d.id+' accepted rider #'+r.id+(r.sg?' (surge)':''));
+      if(r.me){this.mm={d,done:false};this.tr(r,'Driver '+d.id+' accepted. Pickup in '+travel.toFixed(1)+'s. You have waited '+(this.t-r.t0).toFixed(1)+'s so far.');if(this.mode==='batched')sel={sim:this,id:d.id}}
     }else{
       if(d.fate==='to'){this.m.to++;this.say('Driver '+d.id+' timed out, lock released, rider #'+r.id+' re-queued')}
       else{this.m.rej++;this.say('Driver '+d.id+' rejected, rider #'+r.id+' re-offered')}
+      this.tr(r,'Driver '+d.id+(d.fate==='to'?' did not respond (timeout). Lock released after 4s.':' rejected the offer.')+' Looking for the next best driver.');
       d.s='idle';d.cool=this.t+3;d.rider=null;r.pending=false;if(r.tried.size>5)r.tried.clear()}}
   tick(dt,rate){
     this.t+=dt;this.sp+=rate*dt;
@@ -141,7 +155,8 @@ class Sim{
         else if(this.t<d.t1){const f=(this.t-d.t0)/(d.t1-d.t0||1);d.x=d.from.x+(d.pick.x-d.from.x)*f;d.y=d.from.y+(d.pick.y-d.from.y)*f}
         else{const f=(this.t-d.t1)/(d.until-d.t1);d.x=d.pick.x+(d.drop.x-d.pick.x)*f;d.y=d.pick.y+(d.drop.y-d.pick.y)*f}
       }else if(d.s==='idle'){const h=d.id*1.7+Math.sin(this.t*.3+d.id)*2;d.x=Math.min(W,Math.max(0,d.x+Math.cos(h)*10*dt));d.y=Math.min(H,Math.max(0,d.y+Math.sin(h)*10*dt))}}
-    const b=this.q.length;this.q=this.q.filter(r=>r.pending||this.t-r.t0<30);this.m.cancel+=b-this.q.length;
+    const b=this.q.length;this.q=this.q.filter(r=>r.pending||r.me||this.t-r.t0<30);this.m.cancel+=b-this.q.length;
+    if(this.mm&&!this.mm.done&&this.t>=this.mm.d.t1){this.mm.done=true;this.tr(this.me,'Driver '+this.mm.d.id+' arrived. Total wait '+(this.t-this.me.t0).toFixed(1)+'s.')}
     if(this.t>=this.nh){this.nh+=2;this.hist.push(this.recent.length?this.recent.reduce((a,c)=>a+c,0)/this.recent.length:null);if(this.hist.length>150)this.hist.shift()}
     if(this.mode==='greedy'){const g=this.index();for(const r of this.q){if(r.pending)continue;
       const c=this.near(g,r.x,r.y,3).filter(d=>d.s==='idle'&&!r.tried.has(d.id));if(!c.length)continue;
@@ -172,6 +187,10 @@ class Sim{
       if(d.s==='busy'&&this.t<d.t1){c.strokeStyle='rgba(45,226,196,.6)';c.beginPath();c.moveTo(d.x,d.y);c.lineTo(d.pick.x,d.pick.y);c.stroke()}
       c.fillStyle=d.s==='idle'?'#2de2c4':d.s==='offered'?'#ffb020':'#5b6bd6';c.beginPath();c.arc(d.x,d.y,5,0,7);c.fill();
       if(sel&&sel.sim===this&&sel.id===d.id){c.strokeStyle='#fff';c.lineWidth=1.5;c.beginPath();c.arc(d.x,d.y,11,0,7);c.stroke();c.lineWidth=1}}}
+  drawMe(){const r=this.me;if(!r)return;const c=this.ctx;
+    if(!this.mm&&!r.pending){const nb=this.drivers.filter(x=>x.s==='idle').sort((a,b)=>Math.hypot(a.x-r.x,a.y-r.y)-Math.hypot(b.x-r.x,b.y-r.y)).slice(0,4);c.strokeStyle='rgba(255,255,255,.3)';c.setLineDash([2,5]);nb.forEach(d=>{c.beginPath();c.moveTo(r.x,r.y);c.lineTo(d.x,d.y);c.stroke()});c.setLineDash([])}
+    if(this.mm){c.strokeStyle='#2de2c4';c.lineWidth=2;c.beginPath();c.moveTo(this.mm.d.x,this.mm.d.y);c.lineTo(r.x,r.y);c.stroke();c.lineWidth=1}
+    c.strokeStyle='#fff';c.lineWidth=2;c.beginPath();c.arc(r.x,r.y,13+Math.sin(this.t*5)*2,0,7);c.stroke();c.lineWidth=1;c.fillStyle='#fff';c.font='bold 12px Sora,sans-serif';c.fillText('YOU',r.x+17,r.y+4)}
   stats(el,lg){const m=this.m,avg=m.served?(m.sum/m.served).toFixed(1):'-';
     const rows=[[avg+'s','Avg pickup time'],[m.served,'Rides served'],[this.q.length,'Waiting now'],[m.rej+' / '+m.to,'Rejected / timed out'],[m.cancel,'Riders gave up'],[this.jain().toFixed(2),'Fairness (1 = even)']];
     el.innerHTML=rows.map(r=>'<div><b>'+r[0]+'</b><span>'+r[1]+'</span></div>').join('');
@@ -184,7 +203,9 @@ rate.oninput=()=>$('rv').textContent=rate.value;speed.oninput=()=>$('sv').textCo
 $('surge').onchange=e=>opt.surge=e.target.checked;$('heat').onchange=e=>opt.heat=e.target.checked;
 $('reset').onclick=()=>{A.reset();B.reset();sel=null};
 $('layout').onclick=e=>{const s=$('grid').classList.toggle('stack');e.target.textContent=s?'Side by side':'Stack maps'};
+let armed=false;$('reqBtn').onclick=e=>{armed=true;e.target.textContent='Now click a map to drop your pin'};
 [A,B].forEach(s=>s.cv.onclick=e=>{const r=s.cv.getBoundingClientRect(),x=(e.clientX-r.left)*W/r.width,y=(e.clientY-r.top)*H/r.height;
+  if(armed){A.request(x,y);B.request(x,y);armed=false;$('reqBtn').textContent='Request a ride';return}
   let best=null,bd=20;for(const d of s.drivers){const k=Math.hypot(d.x-x,d.y-y);if(k<bd){bd=k;best=d}}sel=best?{sim:s,id:best.id}:null});
 
 function inspect(){const el=$('drv');if(!sel){el.innerHTML='Click a driver dot on either map.';return}
@@ -201,11 +222,15 @@ function chart(){const cv=$('chart'),c=cv.getContext('2d');cv.width=1000;cv.heig
     s.hist.forEach((v,i)=>{if(v===null)return;const x=40+i*(950/150),y=220-(v/mx)*200;st?c.lineTo(x,y):c.moveTo(x,y);st=true});c.stroke();
     c.fillStyle=col;c.fillText(nm,60+k*90,236)})}
 
+function tracePanel(){[[A,'t1'],[B,'t2']].forEach(([s,id])=>{const el=$(id);
+  if(!s.me){el.innerHTML='<p>Press <b>Request a ride</b>, then click either map to drop your pin.</p>';return}
+  let hd='Searching for a driver...';if(s.mm)hd=s.mm.done?'Driver '+s.mm.d.id+' arrived':'Driver '+s.mm.d.id+' arriving in '+Math.max(0,s.mm.d.t1-s.t).toFixed(1)+'s';else if(s.me.pending)hd='Offer sent, waiting for the driver';
+  el.innerHTML='<div class="hd">'+hd+'</div>'+s.mt.slice(-8).map(x=>'<p>'+x+'</p>').join('')})}
 let last=performance.now(),f=0;
 function loop(now){
   const dt=Math.min(.1,(now-last)/1000)*speed.value;last=now;let n=dt;
   while(n>0){const s=Math.min(.05,n);A.tick(s,+rate.value);B.tick(s,+rate.value);n-=s}
-  A.draw();B.draw();f++;inspect();if(f%10===0){A.stats($('m1'),$('l1'));B.stats($('m2'),$('l2'));chart()}
+  A.draw();B.draw();A.drawMe();B.drawMe();f++;inspect();if(f%10===0){A.stats($('m1'),$('l1'));B.stats($('m2'),$('l2'));chart();tracePanel()}
   requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
 
