@@ -6,157 +6,218 @@
 <title>Who gets the ride? Matching engine simulator</title>
 <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#070914;--panel:#0e1226;--line:#232a52;--ink:#e8ecff;--mute:#8b94c9;--idle:#2de2c4;--offer:#ffb020;--busy:#5b6bd6;--rider:#ff4d8d;--good:#2de2c4}
+:root{--bg:#070914;--panel:#0e1226;--line:#232a52;--ink:#e8ecff;--mute:#8b94c9;--idle:#2de2c4;--offer:#ffb020;--busy:#5b6bd6;--rider:#ff4d8d}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font-family:Sora,system-ui,sans-serif;padding:20px;max-width:1280px;margin-inline:auto}
-h1{font-size:clamp(24px,4vw,40px);font-weight:800;margin:0 0 4px;letter-spacing:-.02em}
-.sub{color:var(--mute);margin:0 0 18px;max-width:70ch;line-height:1.5}
-.bar{display:flex;flex-wrap:wrap;gap:16px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:16px}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Sora,system-ui,sans-serif;padding:20px;max-width:1600px;margin-inline:auto}
+h1{font-size:clamp(24px,4vw,42px);font-weight:800;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--mute);margin:0 0 16px;max-width:80ch;line-height:1.5}
+.bar{display:flex;flex-wrap:wrap;gap:16px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:14px}
 .bar label{display:flex;flex-direction:column;font-size:12px;color:var(--mute);gap:4px}
-.bar input{accent-color:var(--idle);width:170px}
-button{font:inherit;font-weight:600;border:1px solid var(--line);background:#161b3a;color:var(--ink);padding:9px 16px;border-radius:8px;cursor:pointer}
+.bar label.ck{flex-direction:row;align-items:center;color:var(--ink);font-size:13px}
+.bar input[type=range]{accent-color:var(--idle);width:160px}
+button{font:inherit;font-weight:600;border:1px solid var(--line);background:#161b3a;color:var(--ink);padding:9px 14px;border-radius:8px;cursor:pointer}
 button:hover{border-color:var(--idle)}
 button:focus-visible,input:focus-visible{outline:2px solid var(--offer);outline-offset:2px}
 button.go{background:var(--idle);color:#04110e;border-color:var(--idle)}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
-@media(max-width:820px){.grid{grid-template-columns:1fr}}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.grid.stack{grid-template-columns:1fr}
+@media(max-width:900px){.grid{grid-template-columns:1fr}}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px}
-.card h2{margin:0 0 8px;font-size:17px}
+.card h2{margin:0 0 8px;font-size:18px}
 .card h2 small{color:var(--mute);font-weight:400;font-size:12px;margin-left:8px}
-canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914}
-.m{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:10px}
+canvas{width:100%;height:auto;display:block;border-radius:6px;background:#070914;cursor:crosshair}
+.m{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-top:10px}
+@media(max-width:700px){.m{grid-template-columns:repeat(3,1fr)}}
 .m div{background:#0a0e20;border-radius:6px;padding:8px}
-.m b{display:block;font-size:20px}
+.m b{display:block;font-size:19px}
 .m span{font-size:11px;color:var(--mute)}
-.legend{font-size:12px;color:var(--mute);margin:12px 0;display:flex;gap:16px;flex-wrap:wrap}
+.log{margin-top:10px;background:#0a0e20;border-radius:6px;padding:8px;font:12px/1.6 ui-monospace,Consolas,monospace;color:var(--mute);min-height:104px}
+.log p{margin:0}
+.legend{font-size:12px;color:var(--mute);margin:0 0 12px;display:flex;gap:16px;flex-wrap:wrap}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px}
-#stress{margin-top:16px;font-size:15px;line-height:1.6}
-#stress b{color:var(--good);font-size:22px}
-.note{color:var(--mute);font-size:12px;margin-top:6px}
+.row2{display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:14px}
+@media(max-width:900px){.row2{grid-template-columns:1fr}}
+.pills{display:flex;gap:6px;margin:8px 0}
+.pills span{flex:1;text-align:center;padding:6px;border-radius:6px;background:#0a0e20;color:var(--mute);font-size:12px}
+.pills span.on{background:var(--c);color:#04110e;font-weight:600}
+#stress{margin-top:14px;font-size:15px;line-height:1.6}
+#stress b{color:var(--idle);font-size:22px}
+.note{color:var(--mute);font-size:12px;margin-top:8px}
 </style>
 </head>
 <body>
 <h1>Who gets the ride?</h1>
-<p class="sub">The same riders and drivers run through two engines. Greedy gives each rider the nearest driver in arrival order. Batched collects requests for 2 seconds, then assigns everyone together, favoring riders who waited longest and drivers likely to accept.</p>
+<p class="sub">The same riders and drivers run through two engines. Greedy gives each rider the nearest driver in arrival order. Batched collects requests for 2 seconds, then solves one optimal assignment (Hungarian algorithm), weighing wait time, surge priority and each driver's chance of accepting.</p>
 
 <div class="bar">
   <label>Demand: <span id="rv">2.5</span> riders/sec<input id="rate" type="range" min="0.5" max="6" step="0.5" value="2.5"></label>
   <label>Sim speed: <span id="sv">2</span>x<input id="speed" type="range" min="1" max="4" step="1" value="2"></label>
+  <label class="ck"><input id="surge" type="checkbox">&nbsp;Surge zone</label>
+  <label class="ck"><input id="heat" type="checkbox" checked>&nbsp;Demand heatmap</label>
+  <button id="layout">Stack maps</button>
   <button id="reset">Reset both</button>
-  <button id="stressBtn" class="go">Run stress test (5,000 requests)</button>
+  <button id="stressBtn" class="go">Run stress test (5,000)</button>
 </div>
 
 <div class="legend">
   <span><i style="background:var(--idle)"></i>Idle driver</span>
-  <span><i style="background:var(--offer)"></i>Offer sent (locked)</span>
+  <span><i style="background:var(--offer)"></i>Offer sent, driver locked</span>
   <span><i style="background:var(--busy)"></i>On a trip</span>
   <span><i style="background:var(--rider)"></i>Waiting rider</span>
+  <span>Click any driver to inspect it</span>
 </div>
 
-<div class="grid">
-  <section class="card"><h2>Greedy <small>nearest driver, first come first served</small></h2><canvas id="c1"></canvas><div class="m" id="m1"></div></section>
-  <section class="card"><h2>Batched <small>2s window, global assignment</small></h2><canvas id="c2"></canvas><div class="m" id="m2"></div></section>
+<div class="grid" id="grid">
+  <section class="card"><h2>Greedy <small>nearest driver, first come first served</small></h2><canvas id="c1"></canvas><div class="m" id="m1"></div><div class="log" id="l1"></div></section>
+  <section class="card"><h2>Batched <small>2s window, Hungarian optimal assignment</small></h2><canvas id="c2"></canvas><div class="m" id="m2"></div><div class="log" id="l2"></div></section>
 </div>
 
-<div class="card" id="stress" style="margin-top:16px">Press <b>Run stress test</b> to fire 5,000 simultaneous requests at 200 drivers and check for double assignments.</div>
-<p class="note">Driver lock = atomic claim: set BUSY only if currently AVAILABLE, with a timeout. In production this is one Redis Lua script. Here the spatial index is a square grid, the same idea as H3 hex cells.</p>
+<div class="row2">
+  <div class="card"><h2>Average pickup time over time <small>lower is better</small></h2><canvas id="chart" style="cursor:default"></canvas></div>
+  <div class="card"><h2>Driver inspector</h2><div id="drv" class="note">Click a driver dot on either map.</div></div>
+</div>
+
+<div class="card" id="stress">Press <b>Run stress test</b> to fire 5,000 simultaneous requests at 200 drivers and check for double assignments.</div>
+<p class="note">Driver lock = atomic claim: set OFFERED only if currently AVAILABLE, with a timeout. In production this is one Redis Lua script. The spatial index here is a square grid, the same idea as H3 hex cells.</p>
 
 <script>
-const W=600,H=420,CELL=60,SPEED=70;
+const W=800,H=520,CELL=80,SPEED=90,ZX=560,ZY=170,ZR=95;
+const opt={surge:false,heat:true};let sel=null;
 function rng(s){return()=>{s|=0;s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
 
+function hung(a,n,m){ // Hungarian algorithm, a is 1-indexed n x m (n<=m); returns p[col]=row
+  const u=Array(n+1).fill(0),v=Array(m+1).fill(0),p=Array(m+1).fill(0),way=Array(m+1).fill(0);
+  for(let i=1;i<=n;i++){p[0]=i;let j0=0;const mv=Array(m+1).fill(1e9),used=Array(m+1).fill(false);
+    do{used[j0]=true;const i0=p[j0];let d=1e9,j1=0;
+      for(let j=1;j<=m;j++)if(!used[j]){const c=a[i0][j]-u[i0]-v[j];if(c<mv[j]){mv[j]=c;way[j]=j0}if(mv[j]<d){d=mv[j];j1=j}}
+      for(let j=0;j<=m;j++)if(used[j]){u[p[j]]+=d;v[j]-=d}else mv[j]-=d;
+      j0=j1}while(p[j0]!==0);
+    do{const j1=way[j0];p[j0]=p[j1];j0=j1}while(j0)}
+  return p}
+
 class Sim{
-  constructor(cv,mode){cv.width=W;cv.height=H;this.ctx=cv.getContext('2d');this.mode=mode;this.reset()}
+  constructor(cv,mode,name){cv.width=W;cv.height=H;this.cv=cv;this.ctx=cv.getContext('2d');this.mode=mode;this.name=name;this.reset()}
   reset(){
-    const r=rng(7);this.rs=rng(11);this.ra=rng(13);this.t=0;this.nextBatch=2;this.nid=0;this.sp=0;this.q=[];
-    this.drivers=[...Array(40)].map((_,i)=>({id:i,x:r()*W,y:r()*H,s:'idle',since:0,idle:0,trips:0,acc:.55+r()*.4,until:0,cool:0,rider:null}));
-    this.m={served:0,sum:0,rej:0,cancel:0,dbl:0,blocked:0};
-    this.ctx.fillStyle='#070914';this.ctx.fillRect(0,0,W,H);
-  }
+    const r=rng(7);this.rs=rng(11);this.ra=rng(13);this.t=0;this.nextBatch=2;this.nh=2;this.nid=0;this.sp=0;this.q=[];this.log=[];this.hist=[];this.recent=[];
+    this.heat=Array(11*8).fill(0);
+    this.drivers=[...Array(60)].map((_,i)=>({id:i,x:r()*W,y:r()*H,s:'idle',since:0,idle:0,trips:0,acc:.55+r()*.4,until:0,cool:0,rider:null,fate:'acc'}));
+    this.m={served:0,sum:0,rej:0,to:0,cancel:0,dbl:0,blocked:0};
+    this.ctx.fillStyle='#070914';this.ctx.fillRect(0,0,W,H)}
+  say(s){this.log.push(this.t.toFixed(0).padStart(3)+'s  '+s);if(this.log.length>5)this.log.shift()}
   index(){const g=new Map();for(const d of this.drivers)if(d.s==='idle'&&this.t>=d.cool){const k=(d.x/CELL|0)+','+(d.y/CELL|0);if(!g.has(k))g.set(k,[]);g.get(k).push(d)}return g}
   near(g,x,y,k){const cx=x/CELL|0,cy=y/CELL|0,out=[];
-    for(let R=0;R<=8;R++){
+    for(let R=0;R<=9;R++){
       for(let i=-R;i<=R;i++)for(let j=-R;j<=R;j++){if(Math.max(Math.abs(i),Math.abs(j))!==R)continue;const a=g.get((cx+i)+','+(cy+j));if(a)out.push(...a)}
       if(R>=1&&out.length>=k)break}
     return out}
-  claim(d,r){ // atomic: only an AVAILABLE driver can be taken
+  claim(d,r){ // atomic: only an AVAILABLE driver can be locked
     if(d.s!=='idle'){this.m.blocked++;return false}
-    d.s='offered';d.rider=r;d.until=this.t+1.2;r.pending=true;r.tried.add(d.id);return true}
+    const dist=Math.hypot(d.x-r.x,d.y-r.y),p=d.acc*(dist>250?.7:1),u=this.ra();
+    d.fate=u<p?'acc':(u<p+(1-p)*.4?'to':'rej');
+    d.s='offered';d.rider=r;d.until=this.t+(d.fate==='to'?4:1.2);r.pending=true;r.tried.add(d.id);return true}
   resolve(d){
-    const r=d.rider,dist=Math.hypot(d.x-r.x,d.y-r.y),p=d.acc*(dist>200?.7:1);
-    if(this.ra()<p){
+    const r=d.rider;
+    if(d.fate==='acc'){
       if(d.s!=='offered')this.m.dbl++;
-      const travel=dist/SPEED;d.s='busy';d.from={x:d.x,y:d.y};d.pick={x:r.x,y:r.y};d.drop={x:this.ra()*W,y:this.ra()*H};
+      const dist=Math.hypot(d.x-r.x,d.y-r.y),travel=dist/SPEED;
+      d.s='busy';d.from={x:d.x,y:d.y};d.pick={x:r.x,y:r.y};d.drop={x:this.ra()*W,y:this.ra()*H};
       d.t0=this.t;d.t1=this.t+travel;d.until=d.t1+8+this.ra()*8;d.trips++;d.idle+=this.t-d.since;
-      this.m.served++;this.m.sum+=(this.t-r.t0)+travel;this.q=this.q.filter(x=>x!==r);
-    }else{this.m.rej++;d.s='idle';d.cool=this.t+3;d.rider=null;r.pending=false;if(r.tried.size>5)r.tried.clear()}
-  }
+      const eta=(this.t-r.t0)+travel;this.m.served++;this.m.sum+=eta;this.recent.push(eta);if(this.recent.length>15)this.recent.shift();
+      this.q=this.q.filter(x=>x!==r);this.say('Driver '+d.id+' accepted rider #'+r.id+(r.sg?' (surge)':''));
+    }else{
+      if(d.fate==='to'){this.m.to++;this.say('Driver '+d.id+' timed out, lock released, rider #'+r.id+' re-queued')}
+      else{this.m.rej++;this.say('Driver '+d.id+' rejected, rider #'+r.id+' re-offered')}
+      d.s='idle';d.cool=this.t+3;d.rider=null;r.pending=false;if(r.tried.size>5)r.tried.clear()}}
   tick(dt,rate){
     this.t+=dt;this.sp+=rate*dt;
-    while(this.sp>=1){this.sp--;this.q.push({id:this.nid++,x:this.rs()*W,y:this.rs()*H,t0:this.t,tried:new Set(),pending:false})}
+    while(this.sp>=1){this.sp--;let x=this.rs()*W,y=this.rs()*H;const u=this.rs(),a=this.rs()*6.28,rr=Math.sqrt(this.rs())*ZR;let sg=false;
+      if(opt.surge&&u<.5){x=ZX+Math.cos(a)*rr;y=ZY+Math.sin(a)*rr;sg=true}
+      this.q.push({id:this.nid++,x,y,t0:this.t,tried:new Set(),pending:false,sg});this.heat[(y/CELL|0)*11+(x/CELL|0)]++}
+    for(let i=0;i<this.heat.length;i++)this.heat[i]*=1-.03*dt;
     for(const d of this.drivers){
       if(d.s==='offered'&&this.t>=d.until)this.resolve(d);
       else if(d.s==='busy'){
         if(this.t>=d.until){d.s='idle';d.since=this.t;d.x=d.drop.x;d.y=d.drop.y;d.rider=null}
         else if(this.t<d.t1){const f=(this.t-d.t0)/(d.t1-d.t0||1);d.x=d.from.x+(d.pick.x-d.from.x)*f;d.y=d.from.y+(d.pick.y-d.from.y)*f}
         else{const f=(this.t-d.t1)/(d.until-d.t1);d.x=d.pick.x+(d.drop.x-d.pick.x)*f;d.y=d.pick.y+(d.drop.y-d.pick.y)*f}
-      }else if(d.s==='idle'){const h=d.id*1.7+Math.sin(this.t*.3+d.id)*2;d.x=Math.min(W,Math.max(0,d.x+Math.cos(h)*10*dt));d.y=Math.min(H,Math.max(0,d.y+Math.sin(h)*10*dt))}
-    }
-    const before=this.q.length;this.q=this.q.filter(r=>r.pending||this.t-r.t0<30);this.m.cancel+=before-this.q.length;
+      }else if(d.s==='idle'){const h=d.id*1.7+Math.sin(this.t*.3+d.id)*2;d.x=Math.min(W,Math.max(0,d.x+Math.cos(h)*10*dt));d.y=Math.min(H,Math.max(0,d.y+Math.sin(h)*10*dt))}}
+    const b=this.q.length;this.q=this.q.filter(r=>r.pending||this.t-r.t0<30);this.m.cancel+=b-this.q.length;
+    if(this.t>=this.nh){this.nh+=2;this.hist.push(this.recent.length?this.recent.reduce((a,c)=>a+c,0)/this.recent.length:null);if(this.hist.length>150)this.hist.shift()}
     if(this.mode==='greedy'){const g=this.index();for(const r of this.q){if(r.pending)continue;
       const c=this.near(g,r.x,r.y,3).filter(d=>d.s==='idle'&&!r.tried.has(d.id));if(!c.length)continue;
       c.sort((a,b)=>Math.hypot(a.x-r.x,a.y-r.y)-Math.hypot(b.x-r.x,b.y-r.y));this.claim(c[0],r)}}
-    else if(this.t>=this.nextBatch){this.nextBatch=this.t+2;this.batch()}
-  }
+    else if(this.t>=this.nextBatch){this.nextBatch=this.t+2;this.batch()}}
   batch(){
-    const g=this.index(),pairs=[];
-    for(const r of this.q){if(r.pending)continue;const age=this.t-r.t0;
-      for(const d of this.near(g,r.x,r.y,6)){if(r.tried.has(d.id))continue;
-        const eta=Math.hypot(d.x-r.x,d.y-r.y)/SPEED,idleBonus=Math.min(this.t-d.since,30)*.05;
-        pairs.push({r,d,c:eta/d.acc-age*.15-idleBonus})}}
-    pairs.sort((a,b)=>a.c-b.c);const ur=new Set(),ud=new Set();
-    for(const p of pairs){if(ud.has(p.d.id)||ur.has(p.r.id))continue;if(this.claim(p.d,p.r)){ud.add(p.d.id);ur.add(p.r.id)}}
-  }
+    const g=this.index();let rs=this.q.filter(r=>!r.pending).slice(0,30);if(!rs.length)return;
+    const cand=new Map(),allow=[];
+    rs.forEach((r,i)=>{allow[i]=new Set();for(const d of this.near(g,r.x,r.y,6))if(!r.tried.has(d.id)){cand.set(d.id,d);allow[i].add(d.id)}});
+    const ds=[...cand.values()];if(!ds.length)return;
+    rs=rs.slice(0,ds.length);const n=rs.length,m=ds.length,a=[[]];
+    for(let i=0;i<n;i++){const r=rs[i],row=[0],age=this.t-r.t0;
+      for(const d of ds){const eta=Math.hypot(d.x-r.x,d.y-r.y)/SPEED,ib=Math.min(this.t-d.since,30)*.05;
+        row.push(allow[i].has(d.id)?eta/d.acc-age*.15-ib-(r.sg?1.5:0):1e4)}
+      a.push(row)}
+    const p=hung(a,n,m);
+    for(let j=1;j<=m;j++)if(p[j]&&a[p[j]][j]<1e3)this.claim(ds[j-1],rs[p[j]-1])}
   jain(){const x=this.drivers.map(d=>d.trips),s=x.reduce((a,b)=>a+b,0),s2=x.reduce((a,b)=>a+b*b,0);return s2?s*s/(x.length*s2):1}
   draw(){
     const c=this.ctx;c.fillStyle='rgba(7,9,20,.22)';c.fillRect(0,0,W,H);
+    if(opt.heat)this.heat.forEach((v,i)=>{if(v>.15){c.fillStyle='rgba(255,77,141,'+Math.min(.28,v*.05)+')';c.fillRect((i%11)*CELL,(i/11|0)*CELL,CELL,CELL)}});
     c.strokeStyle='rgba(120,140,255,.07)';c.lineWidth=1;c.beginPath();
     for(let x=0;x<=W;x+=CELL){c.moveTo(x,0);c.lineTo(x,H)}for(let y=0;y<=H;y+=CELL){c.moveTo(0,y);c.lineTo(W,y)}c.stroke();
-    for(const r of this.q){const p=2+Math.sin(this.t*6+r.id)*1.2;c.fillStyle='#ff4d8d';c.beginPath();c.arc(r.x,r.y,4+p,0,7);c.globalAlpha=.25;c.fill();c.globalAlpha=1;c.beginPath();c.arc(r.x,r.y,3.5,0,7);c.fill()}
+    if(opt.surge){const gr=c.createRadialGradient(ZX,ZY,10,ZX,ZY,ZR);gr.addColorStop(0,'rgba(255,176,32,.28)');gr.addColorStop(1,'rgba(255,176,32,0)');c.fillStyle=gr;c.beginPath();c.arc(ZX,ZY,ZR,0,7);c.fill();c.fillStyle='#ffb020';c.font='12px Sora,sans-serif';c.fillText('Surge zone',ZX-32,ZY-ZR-4)}
+    for(const r of this.q){const p=2+Math.sin(this.t*6+r.id)*1.2;c.fillStyle='#ff4d8d';c.globalAlpha=.25;c.beginPath();c.arc(r.x,r.y,5+p,0,7);c.fill();c.globalAlpha=1;c.beginPath();c.arc(r.x,r.y,4,0,7);c.fill()}
     for(const d of this.drivers){
       if(d.s==='offered'&&d.rider){c.strokeStyle='#ffb020';c.setLineDash([4,4]);c.beginPath();c.moveTo(d.x,d.y);c.lineTo(d.rider.x,d.rider.y);c.stroke();c.setLineDash([])}
       if(d.s==='busy'&&this.t<d.t1){c.strokeStyle='rgba(45,226,196,.6)';c.beginPath();c.moveTo(d.x,d.y);c.lineTo(d.pick.x,d.pick.y);c.stroke()}
-      c.fillStyle=d.s==='idle'?'#2de2c4':d.s==='offered'?'#ffb020':'#5b6bd6';c.beginPath();c.arc(d.x,d.y,4.5,0,7);c.fill()}
-  }
-  stats(el){const m=this.m,avg=m.served?(m.sum/m.served).toFixed(1):'-';
-    const rows=[[avg+'s','Avg time to pickup'],[m.served,'Rides served'],[this.q.length,'Waiting now'],[m.rej,'Offers rejected'],[m.cancel,'Riders gave up'],[this.jain().toFixed(2),'Fairness (1 = even)']];
-    el.innerHTML=rows.map(r=>'<div><b>'+r[0]+'</b><span>'+r[1]+'</span></div>').join('')}
+      c.fillStyle=d.s==='idle'?'#2de2c4':d.s==='offered'?'#ffb020':'#5b6bd6';c.beginPath();c.arc(d.x,d.y,5,0,7);c.fill();
+      if(sel&&sel.sim===this&&sel.id===d.id){c.strokeStyle='#fff';c.lineWidth=1.5;c.beginPath();c.arc(d.x,d.y,11,0,7);c.stroke();c.lineWidth=1}}}
+  stats(el,lg){const m=this.m,avg=m.served?(m.sum/m.served).toFixed(1):'-';
+    const rows=[[avg+'s','Avg pickup time'],[m.served,'Rides served'],[this.q.length,'Waiting now'],[m.rej+' / '+m.to,'Rejected / timed out'],[m.cancel,'Riders gave up'],[this.jain().toFixed(2),'Fairness (1 = even)']];
+    el.innerHTML=rows.map(r=>'<div><b>'+r[0]+'</b><span>'+r[1]+'</span></div>').join('');
+    lg.innerHTML=this.log.map(s=>'<p>'+s+'</p>').join('')||'<p>Waiting for events...</p>'}
 }
 
-const A=new Sim(document.getElementById('c1'),'greedy'),B=new Sim(document.getElementById('c2'),'batched');
-const rate=document.getElementById('rate'),speed=document.getElementById('speed');
-rate.oninput=()=>document.getElementById('rv').textContent=rate.value;
-speed.oninput=()=>document.getElementById('sv').textContent=speed.value;
-document.getElementById('reset').onclick=()=>{A.reset();B.reset()};
-let last=performance.now(),acc=0;
+const A=new Sim(document.getElementById('c1'),'greedy','Greedy'),B=new Sim(document.getElementById('c2'),'batched','Batched');
+const $=id=>document.getElementById(id),rate=$('rate'),speed=$('speed');
+rate.oninput=()=>$('rv').textContent=rate.value;speed.oninput=()=>$('sv').textContent=speed.value;
+$('surge').onchange=e=>opt.surge=e.target.checked;$('heat').onchange=e=>opt.heat=e.target.checked;
+$('reset').onclick=()=>{A.reset();B.reset();sel=null};
+$('layout').onclick=e=>{const s=$('grid').classList.toggle('stack');e.target.textContent=s?'Side by side':'Stack maps'};
+[A,B].forEach(s=>s.cv.onclick=e=>{const r=s.cv.getBoundingClientRect(),x=(e.clientX-r.left)*W/r.width,y=(e.clientY-r.top)*H/r.height;
+  let best=null,bd=20;for(const d of s.drivers){const k=Math.hypot(d.x-x,d.y-y);if(k<bd){bd=k;best=d}}sel=best?{sim:s,id:best.id}:null});
+
+function inspect(){const el=$('drv');if(!sel){el.innerHTML='Click a driver dot on either map.';return}
+  const d=sel.sim.drivers[sel.id],t=sel.sim.t,st=d.s;
+  const pill=(k,l,c)=>'<span class="'+(st===k?'on':'')+'" style="--c:'+c+'">'+l+'</span>';
+  el.innerHTML='<b>'+sel.sim.name+' engine, driver '+d.id+'</b><div class="pills">'+pill('idle','AVAILABLE','#2de2c4')+pill('offered','OFFERED (locked)','#ffb020')+pill('busy','BUSY','#8b9bff')+'</div>'+
+   'Accept chance: '+(d.acc*100|0)+'%<br>Trips done: '+d.trips+'<br>'+(st==='offered'?'Lock expires in '+Math.max(0,d.until-t).toFixed(1)+'s<br>':'')+(st==='busy'?'Free in '+Math.max(0,d.until-t).toFixed(0)+'s<br>':'')+(d.cool>t?'Cooling down after a no-response':'')}
+
+function chart(){const cv=$('chart'),c=cv.getContext('2d');cv.width=1000;cv.height=240;c.clearRect(0,0,1000,240);
+  const all=[...A.hist,...B.hist].filter(v=>v!==null);const mx=Math.max(8,...all)*1.1;
+  c.strokeStyle='rgba(120,140,255,.15)';c.fillStyle='#8b94c9';c.font='12px Sora,sans-serif';
+  for(let i=0;i<=4;i++){const y=20+i*50;c.beginPath();c.moveTo(40,y);c.lineTo(990,y);c.stroke();c.fillText((mx*(1-i/4)).toFixed(0)+'s',4,y+4)}
+  [[A,'#ffb020','Greedy'],[B,'#2de2c4','Batched']].forEach(([s,col,nm],k)=>{c.strokeStyle=col;c.lineWidth=2.5;c.beginPath();let st=false;
+    s.hist.forEach((v,i)=>{if(v===null)return;const x=40+i*(950/150),y=220-(v/mx)*200;st?c.lineTo(x,y):c.moveTo(x,y);st=true});c.stroke();
+    c.fillStyle=col;c.fillText(nm,60+k*90,236)})}
+
+let last=performance.now(),f=0;
 function loop(now){
   const dt=Math.min(.1,(now-last)/1000)*speed.value;last=now;let n=dt;
   while(n>0){const s=Math.min(.05,n);A.tick(s,+rate.value);B.tick(s,+rate.value);n-=s}
-  A.draw();B.draw();acc+=1;if(acc%10===0){A.stats(document.getElementById('m1'));B.stats(document.getElementById('m2'))}
+  A.draw();B.draw();f++;inspect();if(f%10===0){A.stats($('m1'),$('l1'));B.stats($('m2'),$('l2'));chart()}
   requestAnimationFrame(loop)}
 requestAnimationFrame(loop);
 
-document.getElementById('stressBtn').onclick=()=>{
-  const s=new Sim(document.createElement('canvas'),'greedy');s.t=100;
+$('stressBtn').onclick=()=>{
+  const s=new Sim(document.createElement('canvas'),'greedy','test');s.t=100;
   s.drivers=[...Array(200)].map((_,i)=>({id:i,x:Math.random()*W,y:Math.random()*H,s:'idle',since:0,cool:0,acc:.8}));
   const g=s.index(),count={};let claimed=0;const N=5000;
-  for(let i=0;i<N;i++){
-    const r={x:Math.random()*W,y:Math.random()*H,tried:new Set()};
-    const c=s.near(g,r.x,r.y,3);if(!c.length)continue;
-    const d=c[Math.random()*c.length|0]; // stale snapshot: many riders see the same driver
+  for(let i=0;i<N;i++){const r={x:Math.random()*W,y:Math.random()*H,tried:new Set()};
+    const c=s.near(g,r.x,r.y,3);if(!c.length)continue;const d=c[Math.random()*c.length|0];
     if(s.claim(d,r)){claimed++;count[d.id]=(count[d.id]||0)+1}}
   const dbl=Object.values(count).filter(v=>v>1).length;
-  document.getElementById('stress').innerHTML='<b>Double assignments: '+dbl+'</b><br>'+N.toLocaleString()+' requests hit 200 drivers at once. '+claimed+' claims succeeded, one per driver. The atomic check blocked '+s.m.blocked.toLocaleString()+' collisions, so no driver was given to two riders.'};
+  $('stress').innerHTML='<b>Double assignments: '+dbl+'</b><br>'+N.toLocaleString()+' requests hit 200 drivers at once. '+claimed+' claims succeeded, one per driver. The atomic check blocked '+s.m.blocked.toLocaleString()+' collisions, so no driver was given to two riders.'};
 </script>
 </body>
 </html>
